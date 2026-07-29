@@ -1,0 +1,300 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model absensi {
+  id              Int            @id @default(autoincrement())
+  employee_id     Int
+  dikoreksi_oleh  Int?
+  tanggal         DateTime       @db.Date
+  jam_masuk       DateTime?      @db.Time(6)
+  jam_pulang      DateTime?      @db.Time(6)
+  foto_masuk_url  String?        @db.VarChar(255)
+  foto_pulang_url String?        @db.VarChar(255)
+  status          status_absensi
+  dikoreksi_hrd   Boolean?       @default(false)
+  catatan_alasan  String?        @db.VarChar(10000)
+  created_at      DateTime       @default(now()) @db.Timestamp(6)
+  account         account?       @relation(fields: [dikoreksi_oleh], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  employee        employee       @relation(fields: [employee_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([employee_id, tanggal])
+}
+
+model account {
+  id                 Int                  @id @default(autoincrement())
+  name               String               @db.VarChar(255)
+  username           String               @unique @db.VarChar(255)
+  password_hash      String               @db.VarChar(255)
+  role               role_account
+  is_active          Boolean              @default(true)
+  created_at         DateTime             @default(now()) @db.Timestamp(6)
+  absensi            absensi[]
+  hari_libur         hari_libur[]
+  log_aktivitas      log_aktivitas[]
+  pengajuan          pengajuan[]
+  periode_penggajian periode_penggajian[]
+}
+
+model employee {
+  id                        Int                         @id @default(autoincrement())
+  jabatan_id                Int
+  nik                       String                      @unique @db.VarChar(16)
+  name                      String                      @db.VarChar(150)
+  username                  String                      @unique @db.VarChar(150)
+  password_hash             String                      @db.VarChar(255)
+  gender                    gender_employee
+  join_date                 DateTime                    @db.Date
+  status_pernikahan         status_pernikahan_employee
+  jumlah_tanggungan         Int                         @default(0) @db.SmallInt
+  bank_account_number       String                      @db.VarChar(10)
+  photo_url                 String?                     @db.VarChar(255)
+  status_kepegawaian        status_kepegawaian_employee
+  durasi_kontrak_bulan      Int?                        @db.SmallInt
+  tanggal_nonaktif_otomatis DateTime?                   @db.Date
+  is_active                 Boolean                     @default(true)
+  created_at                DateTime                    @default(now()) @db.Timestamp(6)
+  absensi                   absensi[]
+  jabatan                   jabatan                     @relation(fields: [jabatan_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  pengajuan                 pengajuan[]
+  saldo_cuti                saldo_cuti[]
+  slip_gaji                 slip_gaji[]
+}
+
+model hari_libur {
+  id         Int      @id(map: "id") @default(autoincrement())
+  created_by Int
+  tanggal    DateTime @unique(map: "tanggal") @db.Date
+  keterangan String?  @db.VarChar(255)
+  account    account  @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "created_by")
+}
+
+model jabatan {
+  id                Int              @id @default(autoincrement())
+  nama              String           @db.VarChar(150)
+  gaji_pokok        Decimal          @db.Decimal(15, 2)
+  tunjangan_jabatan Decimal          @default(0) @db.Decimal(15, 2)
+  uang_makan        Decimal          @default(0) @db.Decimal(15, 2)
+  created_at        DateTime         @default(now()) @db.Timestamp(6)
+  employee          employee[]
+  tunjangan_lain    tunjangan_lain[]
+}
+
+model jadwal_kerja {
+  id                    Int       @id @default(autoincrement())
+  hari                  hari      @unique
+  jam_masuk             DateTime? @db.Time(6)
+  jam_pulang            DateTime? @db.Time(6)
+  toleransi_telat_menit Int       @db.SmallInt
+}
+
+model jenis_potongan {
+  id            Int                  @id @default(autoincrement())
+  nama          String               @db.VarChar(100)
+  kategori      kategori_potongan
+  mode_hitung   mode_hitung_potongan
+  tipe_nilai    tipe_nilai_potongan
+  nilai_default Decimal?             @db.Decimal(15, 2)
+  status_aktif  Boolean?             @default(true)
+}
+
+model log_aktivitas {
+  id           Int      @id @default(autoincrement())
+  account_id   Int
+  aksi         aksi_log
+  tabel_target String   @db.VarChar(50)
+  id_target    Int
+  nilai_lama   Json?
+  nilai_baru   Json?
+  created_at   DateTime @default(now()) @db.Timestamp(6)
+  account      account  @relation(fields: [account_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model pengajuan {
+  id                   Int              @id @default(autoincrement())
+  employee_id          Int
+  diproses_oleh        Int?
+  jenis                jenis_pengajuan
+  tanggal_mulai_cuti   DateTime?        @db.Date
+  tanggal_selesai_cuti DateTime?        @db.Date
+  alasan_cuti          String?          @db.VarChar(10000)
+  tanggal_sakit        DateTime?        @db.Date
+  tanggal_lembur       DateTime?        @db.Date
+  jam_mulai_lembur     DateTime?        @db.Time(6)
+  jam_selesai_lembur   DateTime?        @db.Time(6)
+  total_menit_lembur   Int?             @db.SmallInt
+  foto_bukti_url       String?          @db.VarChar(255)
+  status               status_pengajuan @default(menunggu)
+  catatan_penolakan    String?          @db.VarChar(10000)
+  diajukan_pada        DateTime         @default(now()) @db.Timestamp(6)
+  diproses_pada        DateTime?        @db.Timestamp(6)
+  account              account?         @relation(fields: [diproses_oleh], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  employee             employee         @relation(fields: [employee_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model periode_penggajian {
+  id           Int            @id @default(autoincrement())
+  dikunci_oleh Int?
+  tahun        Int            @db.SmallInt
+  bulan        Int            @db.SmallInt
+  status       status_periode @default(draft)
+  dikunci_pada DateTime?      @db.Timestamp(6)
+  account      account?       @relation(fields: [dikunci_oleh], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  slip_gaji    slip_gaji[]
+
+  @@unique([bulan, tahun])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model saldo_cuti {
+  id          Int      @id @default(autoincrement())
+  employee_id Int
+  tahun       Int      @db.SmallInt
+  kuota       Int      @db.SmallInt
+  terpakai    Int      @default(0) @db.SmallInt
+  employee    employee @relation(fields: [employee_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([employee_id, tahun])
+}
+
+model slip_gaji {
+  id                    Int                @id @default(autoincrement())
+  periode_penggajian_id Int
+  employee_id           Int
+  gaji_pokok            Decimal            @db.Decimal(15, 2)
+  tunjangan_jabatan     Decimal            @default(0) @db.Decimal(15, 2)
+  uang_makan            Decimal            @default(0) @db.Decimal(15, 2)
+  total_lembur          Decimal            @default(0) @db.Decimal(15, 2)
+  total_tunjangan_lain  Decimal            @default(0) @db.Decimal(15, 2)
+  total_potongan        Decimal            @default(0) @db.Decimal(15, 2)
+  gaji_bersih           Decimal            @db.Decimal(15, 2)
+  generated_at          DateTime           @default(now()) @db.Timestamp(6)
+  employee              employee           @relation(fields: [employee_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  periode_penggajian    periode_penggajian @relation(fields: [periode_penggajian_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  slip_gaji_detail      slip_gaji_detail[]
+
+  @@unique([periode_penggajian_id, employee_id])
+}
+
+model slip_gaji_detail {
+  id            Int                   @id @default(autoincrement())
+  slip_gaji_id  Int
+  tipe          tipe_slip_gaji_detail
+  nama_komponen String                @db.VarChar(100)
+  nominal       Decimal               @db.Decimal(15, 2)
+  slip_gaji     slip_gaji             @relation(fields: [slip_gaji_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model tarif_lembur {
+  id         Int              @id @default(autoincrement())
+  tipe_hari  tipe_hari_lembur
+  multiplier Decimal?         @db.Decimal(4, 2)
+}
+
+model tunjangan_lain {
+  id                Int      @id @default(autoincrement())
+  jabatan_id        Int?
+  nama              String   @db.VarChar(100)
+  nominal           Decimal  @db.Decimal(15, 2)
+  tanggal_pencairan DateTime @db.Date
+  status_aktif      Boolean  @default(true)
+  jabatan           jabatan? @relation(fields: [jabatan_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+enum aksi_log {
+  buat
+  ubah
+  hapus
+  setujui
+  tolak
+  kunci
+  buka_kunci
+}
+
+enum gender_employee {
+  L
+  P
+}
+
+enum hari {
+  senin
+  selasa
+  rabu
+  kamis
+  jumat
+  sabtu
+  minggu
+}
+
+enum jenis_pengajuan {
+  cuti
+  sakit
+  lembur
+}
+
+enum kategori_potongan {
+  bpjs
+  pajak
+  kehadiran
+  kustom
+}
+
+enum mode_hitung_potongan {
+  otomatis
+  manual
+}
+
+enum role_account {
+  hrd
+  admin_owner
+}
+
+enum status_absensi {
+  hadir
+  telat
+  alpha
+  sakit
+  cuti
+  libur
+}
+
+enum status_kepegawaian_employee {
+  tetap
+  kontrak
+}
+
+enum status_pengajuan {
+  menunggu
+  disetujui
+  ditolak
+}
+
+enum status_periode {
+  draft
+  terkunci
+}
+
+enum status_pernikahan_employee {
+  TK
+  K
+}
+
+enum tipe_hari_lembur {
+  kerja
+  libur
+}
+
+enum tipe_nilai_potongan {
+  nominal
+  persen
+}
+
+enum tipe_slip_gaji_detail {
+  tambahan
+  potongan
+}
