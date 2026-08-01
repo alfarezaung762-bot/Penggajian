@@ -1,85 +1,70 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/session';
-import { catatLog } from '@/lib/log-aktivitas';
-import { koreksiAbsensiSchema } from '@/lib/validations/absensi-schema';
+import { NextRequest } from 'next/server'
+import prisma from '@/lib/prisma'
+import { getSession } from '@/lib/session'
+import { catatLog } from '@/lib/log-aktivitas'
+import { successResponse, errorResponse, unauthorizedResponse, forbiddenResponse } from '@/lib/api-response'
 
-export async function GET(
-  request: Request,
+// PUT / PATCH — Koreksi status absensi oleh HRD/Admin
+export async function PUT(
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await getSession();
-  if (!session) {
-    return NextResponse.json({ error: 'Akses ditolak' }, { status: 403 });
-  }
-
-  const { id } = await params;
-  const absensiId = parseInt(id, 10);
-
-  const absensi = await prisma.absensi.findUnique({
-    where: { id: absensiId },
-    include: { employee: true, account: true },
-  });
-
-  if (!absensi) {
-    return NextResponse.json({ error: 'Data absensi tidak ditemukan' }, { status: 404 });
-  }
-
-  if (session.role === 'karyawan' && session.employee_id !== absensi.employee_id) {
-    return NextResponse.json({ error: 'Akses ditolak (IDOR Prevented)' }, { status: 403 });
-  }
-
-  return NextResponse.json({ data: absensi });
-}
-
-export async function PATCH(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const session = await getSession();
-  if (!session || (session.role !== 'hrd' && session.role !== 'admin_owner')) {
-    return NextResponse.json({ error: 'Akses ditolak (khusus HRD/Admin)' }, { status: 403 });
-  }
-
-  const { id } = await params;
-  const absensiId = parseInt(id, 10);
+  const session = await getSession()
+  if (!session || session.type !== 'account') return unauthorizedResponse()
+  if (session.role !== 'hrd' && session.role !== 'admin_owner') return forbiddenResponse('Hanya HRD atau Admin yang dapat mengoreksi absensi')
 
   try {
-    const body = await request.json();
-    const validatedData = koreksiAbsensiSchema.parse(body);
+    const { id } = await params
+    const absensiId = parseInt(id)
+    if (isNaN(absensiId)) return errorResponse('ID Absensi tidak valid')
 
-    const oldAbsensi = await prisma.absensi.findUnique({ where: { id: absensiId } });
-    if (!oldAbsensi) {
-      return NextResponse.json({ error: 'Data absensi tidak ditemukan' }, { status: 404 });
+    const body = await request.json()
+    const { status, alasan } = body
+
+    if (!status || !['hadir', 'telat', 'alpha', 'sakit', 'cuti', 'libur'].includes(status)) {
+      return errorResponse('Status absensi tidak valid')
     }
+
+    if (!alasan || alasan.trim() === '') {
+      return errorResponse('Alasan koreksi wajib diisi oleh HRD')
+    }
+
+    const existing = await prisma.absensi.findUnique({
+      where: { id: absensiId },
+    })
+
+    if (!existing) return errorResponse('Data absensi tidak ditemukan')
 
     const updated = await prisma.absensi.update({
       where: { id: absensiId },
       data: {
-        status: validatedData.status,
+        status: status as any,
         dikoreksi_hrd: true,
-        catatan_alasan: validatedData.catatan_alasan,
-        dikoreksi_oleh: session.account_id ?? null,
+        dikoreksi_oleh: session.id,
+        catatan_alasan: alasan,
       },
-    });
+    })
 
-    if (session.account_id) {
-      await catatLog({
-        account_id: session.account_id,
-        aksi: 'ubah',
-        tabel_target: 'absensi',
-        id_target: absensiId,
-        nilai_lama: { status: oldAbsensi.status, dikoreksi_hrd: oldAbsensi.dikoreksi_hrd },
-        nilai_baru: { status: updated.status, dikoreksi_hrd: true, catatan_alasan: validatedData.catatan_alasan },
-      });
-    }
+    // Catat Audit Log secara otomatis
+    await catatLog({
+      accountId: session.id,
+      aksi: 'ubah',
+      tabelTarget: 'absensi',
+      idTarget: absensiId,
+      nilaiLama: { status: existing.status, catatan_alasan: existing.catatan_alasan },
+      nilaiBaru: { status, catatan_alasan: alasan, dikoreksi_oleh: session.name },
+    })
 
-    return NextResponse.json({ data: updated });
-  } catch (error: any) {
-    console.error('Error koreksi absensi:', error);
-    if (error.name === 'ZodError') {
-      return NextResponse.json({ error: error.errors[0]?.message || 'Input tidak valid' }, { status: 400 });
-    }
-    return NextResponse.json({ error: 'Gagal mengoreksi absensi' }, { status: 500 });
+    return successResponse(updated)
+  } catch (error) {
+    console.error('Koreksi absensi error:', error)
+    return errorResponse('Gagal mengoreksi status absensi', 500)
   }
+}
+
+export async function PATCH(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  return PUT(request, context)
 }

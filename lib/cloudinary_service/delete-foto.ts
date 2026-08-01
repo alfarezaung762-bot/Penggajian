@@ -1,11 +1,19 @@
-import cloudinary from './cloudinary-config';
+import cloudinary from './cloudinary-config'
 
-export async function deleteFoto(publicId: string): Promise<boolean> {
-  try {
-    const result = await cloudinary.uploader.destroy(publicId);
-    return result.result === 'ok';
-  } catch (error) {
-    console.error('Gagal menghapus foto dari Cloudinary:', error);
-    return false;
+export async function deleteFoto(publicIdOrUrl: string): Promise<void> {
+  // Jika input berupa URL lengkap, ekstrak public_id
+  let publicId = publicIdOrUrl
+
+  if (publicIdOrUrl.startsWith('http')) {
+    // Contoh URL: https://res.cloudinary.com/xxx/image/upload/v123/penggajian/profil/employee_1.jpg
+    const urlParts = publicIdOrUrl.split('/upload/')
+    if (urlParts[1]) {
+      // Hapus version prefix (v123/) dan ekstensi file
+      publicId = urlParts[1]
+        .replace(/^v\d+\//, '')
+        .replace(/\.[^.]+$/, '')
+    }
   }
+
+  await cloudinary.uploader.destroy(publicId)
 }

@@ -1,49 +1,22 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/session';
+import { NextRequest } from 'next/server'
+import prisma from '@/lib/prisma'
+import { getSession } from '@/lib/session'
+import { successResponse, unauthorizedResponse } from '@/lib/api-response'
 
-export async function GET() {
-  const session = await getSession();
-  if (!session) {
-    return NextResponse.json({ error: 'Akses ditolak' }, { status: 403 });
-  }
+export async function GET(request: NextRequest) {
+  const session = await getSession()
+  if (!session) return unauthorizedResponse()
 
-  const currentYear = new Date().getFullYear();
-  const empId = session.employee_id;
+  const url = request.nextUrl
+  const employeeId = session.type === 'employee' ? session.id : parseInt(url.searchParams.get('employee_id') || '0')
+  const tahun = parseInt(url.searchParams.get('tahun') || String(new Date().getFullYear()))
 
-  if (!empId && session.role === 'karyawan') {
-    return NextResponse.json({ error: 'Data karyawan tidak ditemukan' }, { status: 400 });
-  }
+  if (!employeeId) return successResponse([])
 
-  if (session.role === 'karyawan') {
-    const saldo = await prisma.saldo_cuti.findUnique({
-      where: {
-        employee_id_tahun: {
-          employee_id: empId!,
-          tahun: currentYear,
-        },
-      },
-    });
+  const saldo = await prisma.saldo_cuti.findMany({
+    where: { employee_id: employeeId, tahun },
+    orderBy: { tahun: 'desc' },
+  })
 
-    const kuota = saldo ? saldo.kuota : 12;
-    const terpakai = saldo ? saldo.terpakai : 0;
-    const sisa = kuota - terpakai;
-
-    return NextResponse.json({
-      data: {
-        tahun: currentYear,
-        kuota,
-        terpakai,
-        sisa,
-      },
-    });
-  }
-
-  // HRD/Admin bisa mengambil seluruh saldo cuti
-  const saldoList = await prisma.saldo_cuti.findMany({
-    where: { tahun: currentYear },
-    include: { employee: true },
-  });
-
-  return NextResponse.json({ data: saldoList });
+  return successResponse(saldo)
 }

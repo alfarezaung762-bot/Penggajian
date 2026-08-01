@@ -1,59 +1,45 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/session';
-import { catatLog } from '@/lib/log-aktivitas';
+import { NextRequest } from 'next/server'
+import prisma from '@/lib/prisma'
+import { getSession } from '@/lib/session'
+import { createPotonganSchema } from '@/lib/validations/potongan-schema'
+import { successResponse, errorResponse, unauthorizedResponse } from '@/lib/api-response'
 
+// GET — List semua jenis potongan (HRD & Admin/Owner)
 export async function GET() {
-  const session = await getSession();
-  if (!session) {
-    return NextResponse.json({ error: 'Akses ditolak' }, { status: 403 });
-  }
+  const session = await getSession()
+  if (!session || session.type !== 'account') return unauthorizedResponse()
 
-  const potonganList = await prisma.jenis_potongan.findMany({
+  const list = await prisma.jenis_potongan.findMany({
     orderBy: { id: 'asc' },
-  });
+  })
 
-  return NextResponse.json({ data: potonganList });
+  return successResponse(list)
 }
 
-export async function POST(request: Request) {
-  const session = await getSession();
-  // Maker-checker: HRD can create potongan directly
-  if (!session || (session.role !== 'hrd' && session.role !== 'admin_owner')) {
-    return NextResponse.json({ error: 'Akses ditolak' }, { status: 403 });
-  }
+// POST — Tambah jenis potongan baru (HRD & Admin/Owner)
+export async function POST(request: NextRequest) {
+  const session = await getSession()
+  if (!session || session.type !== 'account') return unauthorizedResponse()
 
   try {
-    const { nama, kategori, mode_hitung, tipe_nilai, nilai_default, status_aktif } = await request.json();
+    const body = await request.json()
+    const result = createPotonganSchema.safeParse(body)
+    if (!result.success) return errorResponse(result.error.issues[0]?.message || 'Input tidak valid')
 
-    if (!nama || !kategori || !mode_hitung || !tipe_nilai) {
-      return NextResponse.json({ error: 'Field wajib tidak lengkap' }, { status: 400 });
-    }
-
-    const newPotongan = await prisma.jenis_potongan.create({
+    const created = await prisma.jenis_potongan.create({
       data: {
-        nama,
-        kategori,
-        mode_hitung,
-        tipe_nilai,
-        nilai_default: nilai_default ? parseFloat(nilai_default) : 0,
-        status_aktif: status_aktif !== undefined ? status_aktif : true,
+        nama: result.data.nama,
+        kategori: result.data.kategori as 'bpjs' | 'pajak' | 'kehadiran' | 'kustom',
+        mode_hitung: result.data.mode_hitung as 'otomatis' | 'manual',
+        tipe_nilai: result.data.tipe_nilai as 'nominal' | 'persen',
+        nilai_default: result.data.nilai_default ?? 0,
+        status_aktif: result.data.status_aktif ?? true,
       },
-    });
+    })
 
-    if (session.account_id) {
-      await catatLog({
-        account_id: session.account_id,
-        aksi: 'buat',
-        tabel_target: 'jenis_potongan',
-        id_target: newPotongan.id,
-        nilai_baru: { nama, kategori, mode_hitung, tipe_nilai, nilai_default, status_aktif },
-      });
-    }
-
-    return NextResponse.json({ data: newPotongan }, { status: 201 });
+    return successResponse(created, 201)
   } catch (error) {
-    console.error('Error create jenis potongan:', error);
-    return NextResponse.json({ error: 'Gagal membuat jenis potongan' }, { status: 500 });
+    console.error('Create jenis potongan error:', error)
+    return errorResponse('Gagal membuat jenis potongan', 500)
   }
 }

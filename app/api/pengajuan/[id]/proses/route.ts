@@ -1,86 +1,122 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/session';
-import { catatLog } from '@/lib/log-aktivitas';
+import { NextRequest } from 'next/server'
+import prisma from '@/lib/prisma'
+import { getSession } from '@/lib/session'
+import { prosesPengajuanSchema } from '@/lib/validations/pengajuan-schema'
+import { catatLog } from '@/lib/log-aktivitas'
+import { successResponse, errorResponse, unauthorizedResponse, forbiddenResponse, notFoundResponse } from '@/lib/api-response'
 
+// PATCH — approve/reject pengajuan (HRD/Admin)
 export async function PATCH(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await getSession();
-  if (!session || (session.role !== 'hrd' && session.role !== 'admin_owner')) {
-    return NextResponse.json({ error: 'Akses ditolak (khusus HRD/Admin)' }, { status: 403 });
-  }
+  const session = await getSession()
+  if (!session || session.type !== 'account') return unauthorizedResponse()
+  if (session.role !== 'hrd' && session.role !== 'admin_owner') return forbiddenResponse()
 
-  const { id } = await params;
-  const pengajuanId = parseInt(id, 10);
+  const { id } = await params
+  const pengajuanId = parseInt(id)
+  if (isNaN(pengajuanId)) return errorResponse('ID tidak valid')
 
   try {
-    const { status, catatan_penolakan } = await request.json();
+    const pengajuan = await prisma.pengajuan.findUnique({
+      where: { id: pengajuanId },
+      include: { employee: true },
+    })
+    if (!pengajuan) return notFoundResponse('Pengajuan tidak ditemukan')
+    if (pengajuan.status !== 'menunggu') return errorResponse('Pengajuan sudah diproses sebelumnya')
 
-    if (!status || !['disetujui', 'ditolak'].includes(status)) {
-      return NextResponse.json({ error: 'Status persetujuan tidak valid' }, { status: 400 });
-    }
+    const body = await request.json()
+    const result = prosesPengajuanSchema.safeParse(body)
+    if (!result.success) return errorResponse(result.error.issues[0]?.message || 'Input tidak valid')
 
-    const oldPengajuan = await prisma.pengajuan.findUnique({ where: { id: pengajuanId } });
-    if (!oldPengajuan) {
-      return NextResponse.json({ error: 'Pengajuan tidak ditemukan' }, { status: 404 });
-    }
+    const { status, catatan_penolakan } = result.data
 
-    if (oldPengajuan.status !== 'menunggu') {
-      return NextResponse.json({ error: 'Pengajuan ini sudah pernah diproses' }, { status: 400 });
-    }
+    // Security & Data Integrity Safeguard: jika disetujui, catatan_penolakan SELALU null
+    const finalCatatan = status === 'ditolak' ? (catatan_penolakan ? catatan_penolakan.trim() : null) : null
 
+    // Update pengajuan
     const updated = await prisma.pengajuan.update({
       where: { id: pengajuanId },
       data: {
-        status,
-        catatan_penolakan: status === 'ditolak' ? (catatan_penolakan ?? null) : null,
-        diproses_oleh: session.account_id ?? null,
+        status: status as 'disetujui' | 'ditolak',
+        diproses_oleh: session.id,
         diproses_pada: new Date(),
+        catatan_penolakan: finalCatatan,
       },
-    });
+    })
 
-    // Update terpakai pada saldo_cuti jika pengajuan cuti disetujui
-    if (oldPengajuan.jenis === 'cuti' && status === 'disetujui' && oldPengajuan.tanggal_mulai_cuti && oldPengajuan.tanggal_selesai_cuti) {
-      const startDate = new Date(oldPengajuan.tanggal_mulai_cuti);
-      const endDate = new Date(oldPengajuan.tanggal_selesai_cuti);
-      const daysCount = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-      const year = startDate.getFullYear();
+    // Jika cuti disetujui, update saldo cuti
+    if (status === 'disetujui' && pengajuan.jenis === 'cuti' && pengajuan.tanggal_mulai_cuti && pengajuan.tanggal_selesai_cuti) {
+      const startDate = new Date(pengajuan.tanggal_mulai_cuti)
+      const endDate = new Date(pengajuan.tanggal_selesai_cuti)
+      const jumlahHari = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
 
-      await prisma.saldo_cuti.upsert({
+      await prisma.saldo_cuti.updateMany({
         where: {
-          employee_id_tahun: {
-            employee_id: oldPengajuan.employee_id,
-            tahun: year,
+          employee_id: pengajuan.employee_id,
+          tahun: startDate.getFullYear(),
+        },
+        data: { terpakai: { increment: jumlahHari } },
+      })
+
+      // Buat record absensi 'cuti' untuk setiap hari
+      const dates: Date[] = []
+      const current = new Date(startDate)
+      while (current <= endDate) {
+        dates.push(new Date(current))
+        current.setDate(current.getDate() + 1)
+      }
+
+      for (const date of dates) {
+        await prisma.absensi.upsert({
+          where: {
+            employee_id_tanggal: {
+              employee_id: pengajuan.employee_id,
+              tanggal: date,
+            },
+          },
+          create: {
+            employee_id: pengajuan.employee_id,
+            tanggal: date,
+            status: 'cuti',
+          },
+          update: { status: 'cuti' },
+        })
+      }
+    }
+
+    // Jika sakit disetujui, buat record absensi 'sakit'
+    if (status === 'disetujui' && pengajuan.jenis === 'sakit' && pengajuan.tanggal_sakit) {
+      await prisma.absensi.upsert({
+        where: {
+          employee_id_tanggal: {
+            employee_id: pengajuan.employee_id,
+            tanggal: new Date(pengajuan.tanggal_sakit),
           },
         },
-        update: {
-          terpakai: { increment: daysCount },
-        },
         create: {
-          employee_id: oldPengajuan.employee_id,
-          tahun: year,
-          kuota: 12,
-          terpakai: daysCount,
+          employee_id: pengajuan.employee_id,
+          tanggal: new Date(pengajuan.tanggal_sakit),
+          status: 'sakit',
         },
-      });
+        update: { status: 'sakit' },
+      })
     }
 
-    if (session.account_id) {
-      await catatLog({
-        account_id: session.account_id,
-        aksi: status === 'disetujui' ? 'setujui' : 'tolak',
-        tabel_target: 'pengajuan',
-        id_target: pengajuanId,
-        nilai_lama: { status: 'menunggu' },
-        nilai_baru: { status, catatan_penolakan },
-      });
-    }
+    // Audit log
+    await catatLog({
+      accountId: session.id,
+      aksi: status === 'disetujui' ? 'setujui' : 'tolak',
+      tabelTarget: 'pengajuan',
+      idTarget: pengajuanId,
+      nilaiLama: { status: 'menunggu' },
+      nilaiBaru: { status, catatan_penolakan: finalCatatan },
+    })
 
-    return NextResponse.json({ data: updated });
+    return successResponse(updated)
   } catch (error) {
-    console.error('Error proses pengajuan:', error);
-    return NextResponse.json({ error: 'Gagal memproses pengajuan' }, { status: 500 });
+    console.error('Proses pengajuan error:', error)
+    return errorResponse('Gagal memproses pengajuan', 500)
   }
 }

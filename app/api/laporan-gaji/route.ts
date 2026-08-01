@@ -1,56 +1,69 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/session';
+import { NextRequest } from 'next/server'
+import prisma from '@/lib/prisma'
+import { getSession } from '@/lib/session'
+import { successResponse, errorResponse, unauthorizedResponse, forbiddenResponse } from '@/lib/api-response'
 
-export async function GET(request: Request) {
-  const session = await getSession();
-  if (!session || (session.role !== 'hrd' && session.role !== 'admin_owner')) {
-    return NextResponse.json({ error: 'Akses ditolak (khusus HRD/Admin)' }, { status: 403 });
-  }
+// GET — Laporan Gaji Bulanan Agregasi (Read-only)
+export async function GET(request: NextRequest) {
+  const session = await getSession()
+  if (!session || session.type !== 'account') return unauthorizedResponse()
+  if (session.role !== 'hrd' && session.role !== 'admin_owner') return forbiddenResponse()
 
-  const { searchParams } = new URL(request.url);
-  const month = searchParams.get('month');
-  const year = searchParams.get('year');
+  const url = request.nextUrl
+  const bulan = parseInt(url.searchParams.get('bulan') || String(new Date().getMonth() + 1))
+  const tahun = parseInt(url.searchParams.get('tahun') || String(new Date().getFullYear()))
 
-  const whereClause: any = {};
-  if (month && year) {
-    whereClause.periode_penggajian = {
-      bulan: parseInt(month, 10),
-      tahun: parseInt(year, 10),
-    };
-  }
+  try {
+    const periode = await prisma.periode_penggajian.findFirst({
+      where: { bulan, tahun },
+    })
 
-  const slipList = await prisma.slip_gaji.findMany({
-    where: whereClause,
-    include: {
-      employee: { include: { jabatan: true } },
-      periode_penggajian: true,
-      slip_gaji_detail: true,
-    },
-    orderBy: { generated_at: 'desc' },
-  });
+    if (!periode) {
+      return successResponse({
+        periode: null,
+        reports: [],
+        total_transfer: 0,
+      })
+    }
 
-  const totalGajiPokok = slipList.reduce((sum, item) => sum + Number(item.gaji_pokok), 0);
-  const totalTunjanganJabatan = slipList.reduce((sum, item) => sum + Number(item.tunjangan_jabatan), 0);
-  const totalUangMakan = slipList.reduce((sum, item) => sum + Number(item.uang_makan), 0);
-  const totalLembur = slipList.reduce((sum, item) => sum + Number(item.total_lembur), 0);
-  const totalTunjanganLain = slipList.reduce((sum, item) => sum + Number(item.total_tunjangan_lain), 0);
-  const totalPotongan = slipList.reduce((sum, item) => sum + Number(item.total_potongan), 0);
-  const totalGajiBersih = slipList.reduce((sum, item) => sum + Number(item.gaji_bersih), 0);
-
-  return NextResponse.json({
-    data: {
-      slips: slipList,
-      summary: {
-        total_karyawan: slipList.length,
-        total_gaji_pokok: totalGajiPokok,
-        total_tunjangan_jabatan: totalTunjanganJabatan,
-        total_uang_makan: totalUangMakan,
-        total_lembur: totalLembur,
-        total_tunjangan_lain: totalTunjanganLain,
-        total_potongan: totalPotongan,
-        total_gaji_bersih: totalGajiBersih,
+    const slips = await prisma.slip_gaji.findMany({
+      where: { periode_penggajian_id: periode.id },
+      include: {
+        employee: {
+          select: {
+            id: true,
+            name: true,
+            nik: true,
+            bank_account_number: true,
+            jabatan: { select: { nama: true } },
+          },
+        },
       },
-    },
-  });
+      orderBy: { employee_id: 'asc' },
+    })
+
+    const reports = slips.map((s) => ({
+      id: s.id,
+      employee: s.employee,
+      gaji_pokok: Number(s.gaji_pokok),
+      tunjangan_jabatan: Number(s.tunjangan_jabatan),
+      uang_makan: Number(s.uang_makan),
+      total_lembur: Number(s.total_lembur),
+      total_tunjangan_lain: Number(s.total_tunjangan_lain),
+      total_potongan: Number(s.total_potongan),
+      gaji_net: Number(s.gaji_bersih),
+      generated_at: s.generated_at,
+    }))
+
+    const totalTransfer = reports.reduce((sum, r) => sum + r.gaji_net, 0)
+
+    return successResponse({
+      periode,
+      reports,
+      total_transfer: totalTransfer,
+    })
+  } catch (error) {
+    console.error('Laporan gaji error:', error)
+    return errorResponse('Gagal memuat laporan gaji', 500)
+  }
 }

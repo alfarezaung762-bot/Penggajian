@@ -1,40 +1,55 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/session';
+import { NextRequest } from 'next/server'
+import prisma from '@/lib/prisma'
+import { getSession } from '@/lib/session'
+import { catatLog } from '@/lib/log-aktivitas'
+import { successResponse, errorResponse, unauthorizedResponse, forbiddenResponse } from '@/lib/api-response'
 
+// GET — List tarif lembur (Admin/Owner)
 export async function GET() {
-  const session = await getSession();
-  if (!session) {
-    return NextResponse.json({ error: 'Akses ditolak' }, { status: 403 });
-  }
+  const session = await getSession()
+  if (!session || session.type !== 'account') return unauthorizedResponse()
 
-  const tarifList = await prisma.tarif_lembur.findMany({
+  const list = await prisma.tarif_lembur.findMany({
     orderBy: { id: 'asc' },
-  });
+  })
 
-  return NextResponse.json({ data: tarifList });
+  return successResponse(list)
 }
 
-export async function PUT(request: Request) {
-  const session = await getSession();
-  if (!session || session.role !== 'admin_owner') {
-    return NextResponse.json({ error: 'Akses ditolak (khusus Admin/Owner)' }, { status: 403 });
-  }
+// PUT — Update tarif lembur (Admin/Owner & HRD)
+export async function PUT(request: NextRequest) {
+  const session = await getSession()
+  if (!session || session.type !== 'account') return unauthorizedResponse()
+  if (session.role !== 'admin_owner' && session.role !== 'hrd') return forbiddenResponse('Hanya Admin/Owner dan HRD yang dapat mengubah tarif lembur')
 
   try {
-    const { id, multiplier } = await request.json();
-    if (!id || multiplier === undefined) {
-      return NextResponse.json({ error: 'ID dan multiplier wajib diisi' }, { status: 400 });
+    const body = await request.json()
+    const { id, multiplier } = body
+
+    if (!id || !multiplier || multiplier <= 0) {
+      return errorResponse('ID dan nilai multiplier lembur wajib diisi dengan benar')
     }
 
-    const updated = await prisma.tarif_lembur.update({
-      where: { id: parseInt(id, 10) },
-      data: { multiplier: parseFloat(multiplier) },
-    });
+    const existing = await prisma.tarif_lembur.findUnique({ where: { id: parseInt(id) } })
+    if (!existing) return errorResponse('Tarif lembur tidak ditemukan', 404)
 
-    return NextResponse.json({ data: updated });
+    const updated = await prisma.tarif_lembur.update({
+      where: { id: parseInt(id) },
+      data: { multiplier: parseFloat(multiplier) },
+    })
+
+    await catatLog({
+      accountId: session.id,
+      aksi: 'ubah',
+      tabelTarget: 'tarif_lembur',
+      idTarget: existing.id,
+      nilaiLama: { tipe_hari: existing.tipe_hari, multiplier: Number(existing.multiplier) },
+      nilaiBaru: { tipe_hari: updated.tipe_hari, multiplier: Number(updated.multiplier) },
+    })
+
+    return successResponse(updated)
   } catch (error) {
-    console.error('Error update tarif lembur:', error);
-    return NextResponse.json({ error: 'Gagal memperbarui tarif lembur' }, { status: 500 });
+    console.error('Update tarif lembur error:', error)
+    return errorResponse('Gagal memperbarui tarif lembur', 500)
   }
 }

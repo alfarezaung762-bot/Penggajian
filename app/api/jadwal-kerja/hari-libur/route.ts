@@ -1,46 +1,50 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/session';
+import { NextRequest } from 'next/server'
+import prisma from '@/lib/prisma'
+import { getSession } from '@/lib/session'
+import { createHariLiburSchema } from '@/lib/validations/jadwal-schema'
+import { successResponse, errorResponse, unauthorizedResponse, forbiddenResponse } from '@/lib/api-response'
 
+// GET — list hari libur
 export async function GET() {
-  const session = await getSession();
-  if (!session) {
-    return NextResponse.json({ error: 'Akses ditolak' }, { status: 403 });
-  }
+  const session = await getSession()
+  if (!session) return unauthorizedResponse()
 
-  const hariLiburList = await prisma.hari_libur.findMany({
-    orderBy: { tanggal: 'asc' },
-  });
+  const hariLibur = await prisma.hari_libur.findMany({
+    orderBy: { tanggal: 'desc' },
+    include: { account: { select: { name: true } } },
+  })
 
-  return NextResponse.json({ data: hariLiburList });
+  return successResponse(hariLibur)
 }
 
-export async function POST(request: Request) {
-  const session = await getSession();
-  if (!session || (session.role !== 'hrd' && session.role !== 'admin_owner')) {
-    return NextResponse.json({ error: 'Akses ditolak' }, { status: 403 });
-  }
+// POST — tambah hari libur (HRD only)
+export async function POST(request: NextRequest) {
+  const session = await getSession()
+  if (!session || session.type !== 'account') return unauthorizedResponse()
+  if (session.role !== 'hrd' && session.role !== 'admin_owner') return forbiddenResponse()
 
   try {
-    const { tanggal, keterangan } = await request.json();
+    const body = await request.json()
+    const result = createHariLiburSchema.safeParse(body)
+    if (!result.success) return errorResponse(result.error.issues[0]?.message || 'Input tidak valid')
 
-    if (!tanggal || !keterangan) {
-      return NextResponse.json({ error: 'Tanggal dan keterangan wajib diisi' }, { status: 400 });
-    }
+    // Cek duplikat tanggal
+    const existing = await prisma.hari_libur.findUnique({
+      where: { tanggal: new Date(result.data.tanggal) },
+    })
+    if (existing) return errorResponse('Tanggal tersebut sudah terdaftar sebagai hari libur')
 
-    const accountId = session.account_id || 1;
-
-    const created = await prisma.hari_libur.create({
+    const hariLibur = await prisma.hari_libur.create({
       data: {
-        tanggal: new Date(tanggal),
-        keterangan,
-        created_by: accountId,
+        created_by: session.id,
+        tanggal: new Date(result.data.tanggal),
+        keterangan: result.data.keterangan,
       },
-    });
+    })
 
-    return NextResponse.json({ data: created }, { status: 201 });
+    return successResponse(hariLibur, 201)
   } catch (error) {
-    console.error('Error create hari libur:', error);
-    return NextResponse.json({ error: 'Gagal menambah hari libur' }, { status: 500 });
+    console.error('Create hari libur error:', error)
+    return errorResponse('Gagal menambah hari libur', 500)
   }
 }

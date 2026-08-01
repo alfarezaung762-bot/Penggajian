@@ -1,31 +1,34 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/session';
+import { NextRequest } from 'next/server'
+import prisma from '@/lib/prisma'
+import { getSession } from '@/lib/session'
+import { successResponse, unauthorizedResponse, notFoundResponse, errorResponse } from '@/lib/api-response'
 
+// GET — detail pengajuan
 export async function GET(
-  request: Request,
+  _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await getSession();
-  if (!session) {
-    return NextResponse.json({ error: 'Akses ditolak' }, { status: 403 });
-  }
+  const session = await getSession()
+  if (!session) return unauthorizedResponse()
 
-  const { id } = await params;
-  const pengajuanId = parseInt(id, 10);
+  const { id } = await params
+  const pengajuanId = parseInt(id)
+  if (isNaN(pengajuanId)) return errorResponse('ID tidak valid')
 
   const pengajuan = await prisma.pengajuan.findUnique({
     where: { id: pengajuanId },
-    include: { employee: true, account: true },
-  });
+    include: {
+      employee: { select: { name: true, nik: true, jabatan: { select: { nama: true } } } },
+      account: { select: { name: true } },
+    },
+  })
 
-  if (!pengajuan) {
-    return NextResponse.json({ error: 'Pengajuan tidak ditemukan' }, { status: 404 });
+  if (!pengajuan) return notFoundResponse('Pengajuan tidak ditemukan')
+
+  // Karyawan hanya lihat milik sendiri
+  if (session.type === 'employee' && pengajuan.employee_id !== session.id) {
+    return notFoundResponse('Pengajuan tidak ditemukan')
   }
 
-  if (session.role === 'karyawan' && session.employee_id !== pengajuan.employee_id) {
-    return NextResponse.json({ error: 'Akses ditolak (IDOR Prevented)' }, { status: 403 });
-  }
-
-  return NextResponse.json({ data: pengajuan });
+  return successResponse(pengajuan)
 }

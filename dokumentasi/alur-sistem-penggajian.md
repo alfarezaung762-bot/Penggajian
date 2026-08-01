@@ -60,7 +60,7 @@ Alur: Karyawan membuka menu **Pengajuan** → pilih **Jenis Pengajuan** (Cuti / 
 | **Pengaturan Jadwal** (sidebar bercabang) | Menu induk dengan 2 sub-menu: |
 | &nbsp;&nbsp;↳ *Jam Kerja / Shift* | Atur jam masuk & pulang per hari (Senin–Minggu). Hari yang tidak diisi otomatis dianggap libur mingguan. |
 | &nbsp;&nbsp;↳ *Kalender Libur Nasional* | Input tanggal libur nasional/cuti bersama (Lebaran, Natal, dll). Mencegah karyawan tercatat alpha di tanggal tsb, dan menjadi acuan tarif lembur hari libur. |
-| **Approval Pengajuan** | Menyetujui/menolak pengajuan cuti, sakit, dan lembur dari karyawan, dengan catatan alasan bila ditolak. Untuk pengajuan **Cuti** dan **Lembur**, sistem mewajibkan pengajuan dilakukan minimal **H-4** (4 hari sebelum tanggal yang diajukan) — form otomatis menolak submit jika kurang dari batas tsb. Aturan ini **tidak berlaku untuk Sakit**, karena sifatnya darurat/tidak terduga sehingga bisa diajukan kapan saja (termasuk di hari yang sama). |
+| **Approval Pengajuan** | Menyetujui/menolak pengajuan cuti, sakit, dan lembur dari karyawan, dengan catatan alasan bila ditolak. Untuk pengajuan **Cuti** dan **Lembur**, sistem mewajibkan pengajuan dilakukan minimal **H-2** (2 hari sebelum tanggal yang diajukan) — form otomatis menolak submit jika kurang dari batas tsb. Aturan ini **tidak berlaku untuk Sakit**, karena sifatnya darurat/tidak terduga sehingga bisa diajukan kapan saja (termasuk di hari yang sama). |
 | **Rekap Absensi** | Ringkasan per karyawan: hadir, sakit, alpha, lembur (jam). Filter per bulan. Klik nama karyawan → detail per tanggal beserta foto bukti absensi. HRD dapat **mengoreksi status absensi per tanggal** (misal status awal "Hadir" ternyata setelah ditelusuri foto bukti tidak valid/rekayasa AI, maka HRD mengubahnya jadi "Alpha"). Setiap koreksi wajib menyertakan alasan, dan otomatis tercatat ke **Audit Log** (nilai lama → nilai baru, siapa yang mengubah, kapan) sehingga bisa ditelusuri Admin/Owner. Bisa dicetak per bulan/tahun. |
 | **Laporan Gaji** | Melihat & mencetak laporan gaji seluruh karyawan, filter per bulan/tahun. Read-only (tidak bisa ubah nominal). |
 
@@ -109,12 +109,15 @@ Dikelompokkan menjadi 4 kategori agar mudah dikelola dan ditelusuri:
 
 1. **Cuti tahunan**: 12 hari/tahun (default, dapat diubah Admin), berlaku individual per karyawan, dihitung dari histori pengajuan yang disetujui — bukan kuota per jabatan atau per bulan.
 2. **Sakit vs Alpha**: Sakit dengan bukti surat tidak memotong gaji. Yang memotong gaji hanya ketidakhadiran tanpa keterangan (alpha).
-3. **Lembur**: Tarif berbeda antara hari kerja biasa dan hari libur (mengacu pada aturan Kepmenaker), dihitung dari basis upah per jam (gaji pokok ÷ 173).
-4. **PPh 21**: Dihitung otomatis berdasarkan PTKP (dipengaruhi status pernikahan & jumlah tanggungan karyawan).
+3. **Lembur**: Tarif berbeda antara hari kerja biasa dan hari libur, dihitung dari basis upah per jam (gaji pokok ÷ 173). Nilai default yang diimplementasikan: **1.5×** untuk hari kerja, **2.0×** untuk hari libur/nasional (simplifikasi dari skema bertingkat resmi Kepmenaker — lihat diskusi multiplier di riwayat perancangan; boleh disesuaikan lewat halaman Tarif Lembur).
+4. **PPh 21**: Dihitung otomatis berdasarkan metode **TER (Tarif Efektif Rata-rata)** kategori A/B/C sesuai PP 58 Tahun 2023 — metode ini menggantikan perhitungan progresif manual bulanan yang berlaku sebelumnya, dan merupakan metode yang berlaku aktif untuk pemotongan PPh 21 bulanan saat ini. Kategori TER ditentukan dari `status_pernikahan` & `jumlah_tanggungan` (basis PTKP) di `pph21-service.ts`.
 5. **Histori gaji**: Perubahan gaji pokok/jabatan tidak menimpa data lama — slip gaji bulan sebelumnya harus tetap mencerminkan nilai yang berlaku saat itu.
 6. **Payroll locking**: Slip gaji yang sudah difinalisasi tidak boleh diubah lagi.
 7. **Karyawan kontrak**: Otomatis nonaktif sistem saat durasi kontrak berakhir (berdasarkan tanggal masuk + durasi yang diset saat data dibuat).
 8. **Pola maker-checker untuk Data Jabatan & Potongan Gaji**: HRD memegang akses ubah/tambah/hapus langsung (bukan lagi Admin/Owner secara eksklusif), sementara Admin/Owner berperan sebagai pengawas (*checker*) lewat Log Aktivitas — bukan gerbang persetujuan sebelum perubahan berlaku (bukan *pre-approval*, melainkan *post-hoc monitoring*). Pola ini dikenal sebagai **maker-checker** atau **four-eyes principle**, praktik standar di sistem finansial: satu pihak membuat/mengubah data (*maker* = HRD), pihak lain mengawasi jejaknya (*checker* = Admin/Owner). Tujuannya membebaskan Admin/Owner fokus mengawasi ketimbang mengerjakan detail operasional, sambil tetap menjaga akuntabilitas lewat audit trail yang lengkap (lihat Bagian 4). Keputusan ini murni perubahan **hak akses/otorisasi** di level aplikasi — tidak mengubah struktur tabel `jabatan` maupun `jenis_potongan` di database.
+9. **Auto-reject pengajuan kadaluarsa**: Pengajuan berstatus `menunggu` yang tanggal pelaksanaannya sudah lewat tanpa diproses HRD akan otomatis ditolak sistem (dipicu saat `GET /api/pengajuan` dipanggil via `updateMany`, bukan cron terjadwal terpisah). **Terkonfirmasi**: kolom `diproses_oleh` dibiarkan `null` (kolom ini memang nullable sejak awal — lihat Bagian 7.2), dan alasan penolakan otomatis dicatat eksplisit di `catatan_penolakan` ("Otomatis Ditolak Sistem..."). **Trade-off yang disadari**: aksi ini *tidak* ditulis ke `log_aktivitas` (karena tidak memanggil `catatLog()`, menghindari kebutuhan akun *system* untuk `account_id` yang `NOT NULL`) — sehingga auto-reject tidak muncul di halaman Log Aktivitas, berbeda dari reject manual oleh HRD yang tetap tercatat. Ini penyimpangan kecil dari cakupan Bagian 4 (yang menyebut "approval/reject pengajuan" sebagai salah satu aksi yang wajib diaudit), namun tetap transparan lewat `catatan_penolakan` pada tabel `pengajuan` itu sendiri.
+10. **Otomatisasi harian via cron**: Tiga endpoint di `app/api/cron/` menangani proses yang tidak bisa dipicu manual: `generate-alpha` (menetapkan status Alpha untuk karyawan yang tidak presensi sampai akhir hari), `nonaktif-kontrak` (menonaktifkan karyawan yang `tanggal_nonaktif_otomatis`-nya terlewati — memenuhi catatan Bagian 8.9), dan `saldo-cuti` (reset/inisialisasi kuota cuti tahunan). Ketiganya perlu dipicu penjadwal eksternal (Vercel Cron atau layanan sejenis), karena Next.js tidak memiliki cron job bawaan.
+11. **Penanganan tanggal & zona waktu**: Seluruh perhitungan "hari ini" untuk kolom bertipe `DATE` (`absensi.tanggal`, dsb.) wajib dibakukan menggunakan `Date.UTC(year, month, date)` agar konsisten dengan zona waktu WIB (UTC+7) dan tidak bergeser ke hari sebelumnya — ini mengoreksi bug nyata yang sempat terjadi pada cache foto absensi.
 
 ---
 
@@ -306,7 +309,7 @@ Dokumen ini menjadi dasar untuk penyusunan **ERD (Entity Relationship Diagram)**
 | foto_bukti_url | VARCHAR(255) (nullable) | wajib untuk sakit & lembur | Path/URL foto bukti, 255 cukup untuk URL umum |
 | status | ENUM('menunggu','disetujui','ditolak') | default 'menunggu' | Kategori tetap 3 pilihan |
 | catatan_penolakan | VARCHAR(10000) (nullable) | | Teks bebas panjang tidak terprediksi |
-| diajukan_pada | TIMESTAMP | dipakai validasi H-4 untuk cuti/lembur | Butuh presisi tanggal + jam untuk hitung selisih H-4 secara akurat |
+| diajukan_pada | TIMESTAMP | dipakai validasi H-2 untuk cuti/lembur | Butuh presisi tanggal + jam untuk hitung selisih H-2 secara akurat |
 | diproses_pada | TIMESTAMP (nullable) | | Presisi tanggal + jam kapan diproses |
 
 **8. `saldo_cuti`** — sisa kuota cuti per karyawan per tahun
@@ -446,7 +449,7 @@ Dokumen ini menjadi dasar untuk penyusunan **ERD (Entity Relationship Diagram)**
 
 - Implementasi fitur mengikuti pembagian role & menu pada **Bagian 2** (Karyawan, HRD, Admin/Owner).
 - Struktur tabel, tipe data, dan alasan pemilihannya mengikuti **Bagian 7** — jangan mengubah struktur tabel dari sisi kode (migration) tanpa menyesuaikan dokumen ini, karena database sudah dibuat manual dan menjadi sumber kebenaran (*source of truth*) saat ini, bukan `schema.prisma`.
-- Aturan bisnis (validasi H-4 pengajuan, PPh 21/PTKP, tarif lembur, payroll locking, dsb.) ada di **Bagian 3**.
+- Aturan bisnis (validasi H-2 pengajuan, PPh 21/PTKP, tarif lembur, payroll locking, dsb.) ada di **Bagian 3**.
 - Spesifikasi `audit_log` (sekarang bernama `log_aktivitas`) ada di **Bagian 4**.
 - Setiap API route wajib menerapkan authorization check sesuai catatan di akhir **Bagian 7.3** sebelum mengakses/mengubah data.
 
@@ -476,18 +479,18 @@ app/api/
 │   └── [id]/route.ts                 → PATCH, DELETE (khusus HRD)
 │
 ├── jadwal-kerja/                     → gabungan jam kerja mingguan + hari libur
-│   ├── route.ts                      → GET, PUT (update jam kerja per hari, khusus HRD)
+│   ├── route.ts                      → GET (dibaca semua role, termasuk Karyawan untuk modal "Lihat Jadwal Kerja Saya"), PUT (update, khusus HRD & Admin/Owner)
 │   └── hari-libur/
 │       ├── route.ts                  → GET (list), POST (tambah, khusus HRD)
 │       └── [id]/route.ts             → DELETE
 │
 ├── absensi/
-│   ├── route.ts                      → GET (list/rekap), POST (presensi masuk)
+│   ├── route.ts                      → GET (list/rekap; parameter `bulan`&`tahun` untuk kalender kehadiran bulanan karyawan), POST (presensi masuk)
 │   ├── clock-out/route.ts            → PATCH (presensi pulang)
 │   └── [id]/route.ts                 → PATCH (koreksi HRD), GET (detail + foto)
 │
 ├── pengajuan/
-│   ├── route.ts                      → GET (riwayat), POST (ajukan cuti/sakit/lembur)
+│   ├── route.ts                      → GET (riwayat; sekaligus memicu auto-reject pengajuan kadaluarsa — lihat Bagian 3 poin 9), POST (ajukan cuti/sakit/lembur)
 │   └── [id]/
 │       ├── route.ts                  → GET (detail)
 │       └── proses/route.ts           → PATCH (approve/reject, khusus HRD)
@@ -511,11 +514,19 @@ app/api/
 ├── crud_pengaturan-umum/             → khusus Admin (kuota cuti tahunan, toleransi telat)
 │   └── route.ts                      → GET, PUT
 │
-├── call_payroll/                     → memicu proses generate & kunci payroll (tabel periode_penggajian)
+├── call_payroll/                     → memicu proses generate payroll (tabel periode_penggajian)
 │   ├── route.ts                      → GET (list periode), POST (generate payroll baru)
 │   └── [id]/
 │       ├── route.ts                  → GET (detail 1 periode)
-│       └── kunci/route.ts            → PATCH (lock, khusus Admin)
+│       └── kunci/route.ts            → ⚠️ TIDAK DIPAKAI — endpoint sisa draft, tidak dipanggil frontend manapun. Sebaiknya dihapus (dead code) agar tidak membingungkan.
+│
+├── payroll/
+│   └── lock/route.ts                 → PATCH, endpoint RESMI untuk kunci payroll (khusus Admin) — menerima `{ bulan, tahun }` di body, mengisi `dikunci_oleh`/`dikunci_pada`, dan mencatat log_aktivitas. Dipanggil dari tombol "🔒 Kunci Periode Penggajian" di `kelola_hrd_admin/payroll/page.tsx`.
+│
+├── cron/                             → dipicu penjadwal eksternal (Vercel Cron/sejenis), bukan diakses manual dari UI
+│   ├── generate-alpha/route.ts       → GET, tetapkan status Alpha untuk karyawan yang tidak presensi sampai akhir hari
+│   ├── nonaktif-kontrak/route.ts     → GET, nonaktifkan karyawan yang tanggal_nonaktif_otomatis-nya terlewati
+│   └── saldo-cuti/route.ts           → GET, reset/inisialisasi kuota cuti tahunan
 │
 ├── slip-gaji/
 │   ├── route.ts                      → GET (karyawan: milik sendiri, HRD/Admin: semua)
@@ -535,24 +546,25 @@ Logic kalkulasi gaji **tidak** ditulis langsung di `route.ts`. `route.ts` hanya 
 ```
 lib/
 ├── prisma.ts                    → 1 instance PrismaClient dipakai bersama
-├── session.ts                   → buat/baca/hapus session (dipakai login & middleware)
+├── session.ts                   → buat/baca/hapus session (dipakai login & middleware); memisahkan sesi akun pengelola (`account`) dan sesi karyawan (`employee`) secara independen
 ├── log-aktivitas.ts             → fungsi catatLog(...), tulis ke tabel log_aktivitas
+├── api-response.ts              → standarisasi format response JSON: successResponse, errorResponse, unauthorizedResponse, forbiddenResponse, notFoundResponse
 ├── cloudinary_service/          → integrasi upload foto ke Cloudinary, 1 file per konteks
 │   ├── cloudinary-config.ts     → inisialisasi client Cloudinary (baca dari .env)
 │   ├── upload-foto-absensi.ts   → upload foto presensi masuk/pulang
 │   ├── upload-foto-pengajuan.ts → upload foto bukti sakit/lembur
 │   ├── upload-foto-profil.ts    → upload foto profil karyawan (employee)
 │   └── delete-foto.ts           → hapus foto lama (misal saat foto profil direvisi)
-├── validations/                 → skema validasi input (zod), 1 file per resource
+├── validations/                 → skema validasi input (zod), 1 file per resource, pesan error berbahasa Indonesia
 │   ├── employee-schema.ts
 │   ├── pengajuan-schema.ts
 │   └── absensi-schema.ts
 └── services/
     ├── payroll-service.ts       → orkestrator utama, dipanggil dari POST /api/call_payroll
-    ├── pph21-service.ts         → khusus hitung PTKP + PPh 21 (lihat Bagian 3, poin 4)
+    ├── pph21-service.ts         → khusus hitung PTKP + PPh 21 metode TER A/B/C (lihat Bagian 3, poin 4)
     ├── lembur-service.ts        → khusus hitung nominal lembur (cek hari kerja/libur + multiplier)
     ├── absensi-service.ts       → khusus hitung jumlah alpha & potongan terkait
-    └── pdf-service.ts           → generate slip gaji jadi file PDF yang bisa diunduh karyawan
+    └── pdf-service.ts           → generate slip gaji & laporan gaji jadi file PDF yang bisa diunduh
 
 middleware.ts                    → (di root project) proteksi route berdasarkan session & role
 ```
@@ -580,13 +592,12 @@ Penyimpanan foto (presensi, bukti pengajuan, foto profil karyawan) menggunakan *
 
 ### 8.9 Modul Belum Terimplementasi (Catatan untuk Pengembangan Lanjutan)
 
-Tercatat di sini agar tidak terlewat saat pengembangan berlanjut di Antigravity:
+Update per implementasi terakhir — item yang sudah selesai (auto-nonaktifkan kontrak via cron, `api-response.ts`, `prisma/seed.ts`) dihapus dari daftar ini. Sisa yang tercatat perlu dikerjakan:
 
-- **Auto-nonaktifkan karyawan kontrak** (`employee.tanggal_nonaktif_otomatis`) — Next.js tidak memiliki cron job bawaan; perlu endpoint terpisah yang dipanggil scheduler eksternal (misal `GET /api/cron/deactivate-expired-contracts`) atau Vercel Cron jika deploy ke Vercel.
-- **`api-response.ts`** (opsional) — helper untuk menstandarkan format response JSON di semua endpoint (`{ data: ... }` untuk sukses, `{ error: ... }` untuk gagal).
-- **Testing framework** (Vitest/Jest) — belum diinstal, dibutuhkan untuk unit test layer `lib/services/` (relevan dengan requirement studi kasus: pengujian unit & integrasi).
+- **Testing framework** (Vitest/Jest) — dibutuhkan untuk unit test layer `lib/services/`, khususnya `pph21-service.ts` dan `payroll-service.ts` yang paling kompleks (relevan dengan requirement studi kasus: pengujian unit & integrasi). Belum terkonfirmasi apakah sudah diinstal.
 - **`.env.example`** — versi `.env` dengan nilai dikosongkan, aman untuk ikut di-commit ke repositori sebagai referensi variabel yang dibutuhkan.
-- **`prisma/seed.ts`** — script untuk mengisi data awal (misal 1 akun `admin_owner` default, 1 `jabatan` contoh) agar tidak perlu input manual berulang saat reset database ketika testing.
+- **Hapus endpoint mati**: `app/api/call_payroll/[id]/kunci/route.ts` tidak dipakai frontend manapun (endpoint resmi kunci payroll adalah `PATCH /api/payroll/lock`, terkonfirmasi lewat verifikasi ke tim pengembang) — sebaiknya dihapus untuk kebersihan kode.
+- **Keputusan final**: auto-reject pengajuan kadaluarsa (Bagian 3 poin 9) sengaja **tidak** dicatat ke `log_aktivitas` — sudah diputuskan cukup transparan lewat `catatan_penolakan` pada tabel `pengajuan` itu sendiri, karena `log_aktivitas` difokuskan untuk mengawasi keputusan manusia (HRD/Admin), bukan keputusan otomatis berbasis aturan tetap. Tidak perlu perubahan lebih lanjut pada bagian ini.
 
 ### 8.10 Struktur Frontend (`app/`)
 
@@ -630,9 +641,23 @@ Total **17 halaman** (3 karyawan + 13 kelola_hrd_admin + 1 login). Folder `(dash
 | Kategori | Contoh halaman | Pola |
 |---|---|---|
 | Shared, sama persis untuk kedua role | `data-karyawan`, `jadwal-kerja`, `approval-pengajuan`, `rekap-absensi`, `laporan-gaji` | Tidak ada perbedaan tampilan/hak |
-| Shared, tapi HRD full akses (maker), Admin memantau (checker) | `jabatan`, `potongan-gaji` | Lihat Bagian 3 poin 8 — HRD CRUD langsung, Admin melihat + memantau lewat `log-aktivitas` |
-| Eksklusif Admin/Owner | `akun`, `tarif-lembur`, `tunjangan-lain`, `pengaturan-umum`, `payroll`, `log-aktivitas` | HRD tidak melihat menu ini sama sekali di sidebar |
+| Shared, tapi HRD full akses (maker), Admin memantau (checker) | `jabatan`, `potongan-gaji`, `tarif-lembur` | Lihat Bagian 3 poin 8 — HRD CRUD/update langsung, Admin melihat + memantau lewat `log-aktivitas` |
+| Eksklusif Admin/Owner | `akun`, `tunjangan-lain`, `pengaturan-umum`, `payroll`, `log-aktivitas` | HRD tidak melihat menu ini sama sekali di sidebar |
 
 **Page-level guard** (lapisan UX, bukan lapisan keamanan utama): tiap `page.tsx` yang eksklusif Admin/Owner memeriksa role di awal komponen dan menampilkan pesan/redirect jika role tidak sesuai — ini murni supaya HRD tidak melihat halaman kosong bila nekat mengetik URL manual. **Proteksi sesungguhnya tetap di backend** (`route.ts`, sesuai authorization check Bagian 7.3) — independen dari tampilan frontend, sehingga tetap aman meskipun lapisan UX ini di-bypass.
 
-**Sidebar** di `layout.tsx` memfilter menu yang ditampilkan sesuai role yang login: karyawan hanya melihat 3 menu di atas, HRD melihat 13 menu `kelola_hrd_admin` minus 6 yang eksklusif Admin, Admin/Owner melihat semua 13 menu.
+**Sidebar** di `layout.tsx` memfilter menu yang ditampilkan sesuai role yang login: karyawan hanya melihat 3 menu di atas, HRD melihat 13 menu `kelola_hrd_admin` minus 5 yang eksklusif Admin, Admin/Owner melihat semua 13 menu.
+
+### 8.11 Fitur UI/UX Tambahan Terimplementasi
+
+Fitur berikut sudah diimplementasikan pada iterasi pengembangan terakhir, melengkapi (bukan menggantikan) spesifikasi Bagian 8.10:
+
+- **Modal CRUD terstandarisasi** — halaman `jabatan`, `potongan-gaji`, `jadwal-kerja`/`hari-libur`, dan `tunjangan-lain` menggunakan pola tombol aksi teratas (misal "+ Tambah Jabatan Baru") yang membuka modal dialog, dilengkapi pencarian real-time dan status badge berwarna, menggantikan pola form samping (*side-form*) pada draf awal.
+- **Log Aktivitas — Visual Diff Viewer**: modal pembanding `nilai_lama` vs `nilai_baru` ditampilkan sebagai tabel terstruktur berwarna (hijau = ditambah, merah = diubah), bukan dump JSON mentah — sesuai kebutuhan pemantauan maker-checker di Bagian 3 poin 8.
+- **Akses Pengaturan & Audit Log Tarif Lembur untuk HRD**: halaman `tarif-lembur` dan endpoint `PUT /api/tarif-lembur` kini dibuka untuk role HRD (Maker) selain Admin/Owner, di mana setiap pembaruan faktor multiplier lembur (hari kerja & hari libur) otomatis mencatat `nilai_lama` vs `nilai_baru` ke `log_aktivitas`.
+- **Kalender kehadiran bulanan** pada portal Absensi Karyawan: grid 7 kolom dengan legenda warna per status (Hadir/Telat/Sakit/Cuti/Izin/Lembur/Alpha/Libur), memanfaatkan `join_date` pada `employee` untuk menampilkan status netral "Belum Bergabung" pada tanggal sebelum karyawan mulai bekerja — tanpa memerlukan kolom/tabel baru.
+- **Modal "Lihat Jadwal Kerja Saya"** pada portal Karyawan — akses baca (read-only) ke `GET /api/jadwal-kerja` kini juga dibuka untuk role karyawan (sebelumnya hanya HRD/Admin), khusus untuk menampilkan jam kerja & toleransi keterlambatan miliknya sendiri.
+- **Watermark timestamp** pada foto selfie absensi (tanggal, jam, nama perusahaan) dibubuhkan otomatis di canvas frontend saat pengambilan foto — lapisan verifikasi tambahan di luar data `created_at` yang sudah tersimpan di database.
+- **Notifikasi real-time sidebar**: perubahan status pengajuan memicu custom browser event yang memperbarui badge jumlah pending tanpa reload halaman.
+- **Validasi & pesan error berbahasa Indonesia** pada seluruh skema `zod` di `lib/validations/`.
+- **Master Potongan Gaji — 3 Metode Perhitungan Eksplisit & Guidance Banner**: Pada modal dialog Tambah/Edit Jenis Potongan (`/kelola_hrd_admin/potongan-gaji`), sistem menyediakan 3 opsi metode perhitungan yang eksplisit (*1. Berdasarkan Perhitungan Pajak PPh 21*, *2. Berdasarkan Perhitungan Absensi Denda Alpha*, dan *3. Manual Input Rate % / Nominal Rp Fixed*) dilengkapi banner petunjuk interaktif dan tooltip penjelas — memastikan HRD dan Owner memahami perbedaan mekanisme kalkulasi otomatis versus manual tanpa risiko kesalahan pengisian mode hitung pada potongan kustom (seperti Potongan Keamanan/Seragam).

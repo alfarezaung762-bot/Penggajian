@@ -1,313 +1,246 @@
-'use client';
+'use client'
 
-import { useState, useEffect } from 'react';
-import { Users, Plus, Search, Key, Trash2, CheckCircle, AlertCircle } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react'
+import { useToast } from '@/app/components/ToastProvider'
+import { Plus, Search, Edit, UserX, UserCheck, KeyRound, Eye, ChevronLeft, ChevronRight } from 'lucide-react'
 
 export default function DataKaryawanPage() {
-  const [employees, setEmployees] = useState<any[]>([]);
-  const [jabatanList, setJabatanList] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [modalOpen, setModalOpen] = useState(false);
-  const [resetModalOpen, setResetModalOpen] = useState(false);
-  const [selectedEmpId, setSelectedEmpId] = useState<number | null>(null);
+  const { showToast } = useToast()
+  const [employees, setEmployees] = useState<Record<string, unknown>[]>([])
+  const [jabatanList, setJabatanList] = useState<Record<string, unknown>[]>([])
+  const [pagination, setPagination] = useState({ page: 1, total: 0, totalPages: 0 })
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [showModal, setShowModal] = useState(false)
+  const [editId, setEditId] = useState<number | null>(null)
+  const [showDetail, setShowDetail] = useState<Record<string, unknown> | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [form, setForm] = useState<Record<string, string | number>>({})
 
-  // Form states
-  const [nik, setNik] = useState('');
-  const [name, setName] = useState('');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [jabatanId, setJabatanId] = useState('');
-  const [statusKepegawaian, setStatusKepegawaian] = useState<'tetap' | 'kontrak'>('tetap');
-  const [statusPernikahan, setStatusPernikahan] = useState<string>('TK/0');
-  const [bankAccount, setBankAccount] = useState('');
-
-  const [newPassword, setNewPassword] = useState('');
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-
-  const fetchData = async () => {
+  const fetchEmployees = useCallback(async () => {
+    setLoading(true)
     try {
-      const [resEmp, resJab] = await Promise.all([
-        fetch('/api/crud_employee'),
-        fetch('/api/crud_jabatan'),
-      ]);
-      const dataEmp = await resEmp.json();
-      const dataJab = await resJab.json();
-      if (resEmp.ok) setEmployees(dataEmp.data || []);
-      if (resJab.ok) setJabatanList(dataJab.data || []);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  };
+      const params = new URLSearchParams({ page: String(pagination.page), limit: '10' })
+      if (search) params.set('search', search)
+      if (statusFilter) params.set('status', statusFilter)
+      const res = await fetch(`/api/crud_employee?${params}`)
+      const data = await res.json()
+      if (data.data) { setEmployees(data.data.employees); setPagination(data.data.pagination) }
+    } catch { /* */ }
+    setLoading(false)
+  }, [pagination.page, search, statusFilter])
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+  const fetchJabatan = useCallback(async () => {
+    try { const res = await fetch('/api/crud_jabatan'); const data = await res.json(); if (data.data) setJabatanList(data.data) } catch { /* */ }
+  }, [])
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setMessage(null);
+  useEffect(() => { fetchEmployees() }, [fetchEmployees])
+  useEffect(() => { fetchJabatan() }, [fetchJabatan])
 
+  const openAdd = () => { setEditId(null); setForm({}); setShowModal(true) }
+  const openEdit = (emp: Record<string, unknown>) => {
+    setEditId(emp.id as number)
+    setForm({
+      jabatan_id: emp.jabatan_id as number, nik: emp.nik as string, name: emp.name as string, username: emp.username as string,
+      gender: emp.gender as string, join_date: (emp.join_date as string).split('T')[0],
+      status_pernikahan: emp.status_pernikahan as string, jumlah_tanggungan: emp.jumlah_tanggungan as number,
+      bank_account_number: emp.bank_account_number as string, status_kepegawaian: emp.status_kepegawaian as string,
+      durasi_kontrak_bulan: (emp.durasi_kontrak_bulan as number) || 0,
+    })
+    setShowModal(true)
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault(); setSubmitting(true)
     try {
-      const res = await fetch('/api/crud_employee', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          nik, name, username, password,
-          jabatan_id: parseInt(jabatanId, 10),
-          status_kepegawaian: statusKepegawaian,
-          status_pernikahan: statusPernikahan,
-          bank_account_number: bankAccount,
-        }),
-      });
+      const body = { ...form, jabatan_id: Number(form.jabatan_id), jumlah_tanggungan: Number(form.jumlah_tanggungan), durasi_kontrak_bulan: form.status_kepegawaian === 'kontrak' ? Number(form.durasi_kontrak_bulan) : null }
+      const url = editId ? `/api/crud_employee/${editId}` : '/api/crud_employee'
+      const method = editId ? 'PATCH' : 'POST'
+      const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const data = await res.json()
+      if (!res.ok) { showToast(data.error || 'Gagal', 'error'); setSubmitting(false); return }
+      showToast(editId ? 'Karyawan berhasil diubah!' : 'Karyawan berhasil ditambah!', 'success')
+      setShowModal(false); fetchEmployees()
+    } catch { showToast('Gagal menyimpan', 'error') }
+    setSubmitting(false)
+  }
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Gagal menambah karyawan');
-
-      setMessage({ type: 'success', text: `Karyawan ${name} berhasil ditambahkan!` });
-      setModalOpen(false);
-      setNik(''); setName(''); setUsername(''); setPassword(''); setBankAccount('');
-      fetchData();
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err.message });
-    }
-  };
-
-  const handleResetPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedEmpId) return;
-
+  const toggleActive = async (id: number, currentlyActive: boolean) => {
+    const endpoint = currentlyActive ? `/api/crud_employee/${id}` : `/api/crud_employee/${id}`
+    const method = currentlyActive ? 'DELETE' : 'PATCH'
+    const body = currentlyActive ? undefined : JSON.stringify({ is_active: true })
     try {
-      const res = await fetch(`/api/crud_employee/${selectedEmpId}/reset-password`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ new_password: newPassword }),
-      });
+      const res = await fetch(endpoint, { method, headers: { 'Content-Type': 'application/json' }, body })
+      const data = await res.json()
+      if (!res.ok) { showToast(data.error || 'Gagal', 'error'); return }
+      showToast(currentlyActive ? 'Karyawan dinonaktifkan' : 'Karyawan diaktifkan kembali', 'success')
+      fetchEmployees()
+    } catch { showToast('Gagal mengubah status', 'error') }
+  }
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Gagal reset password');
+  const resetPassword = async (id: number) => {
+    const pw = prompt('Masukkan password baru untuk karyawan:')
+    if (!pw || pw.length < 6) { showToast('Password minimal 6 karakter', 'warning'); return }
+    try {
+      const res = await fetch(`/api/crud_employee/${id}/reset-password`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password_baru: pw }) })
+      const data = await res.json()
+      if (!res.ok) { showToast(data.error || 'Gagal', 'error'); return }
+      showToast('Password berhasil direset!', 'success')
+    } catch { showToast('Gagal reset password', 'error') }
+  }
 
-      setMessage({ type: 'success', text: 'Password karyawan berhasil diperbarui!' });
-      setResetModalOpen(false);
-      setNewPassword('');
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err.message });
-    }
-  };
-
-  const filteredEmployees = employees.filter(
-    (e) =>
-      e.name.toLowerCase().includes(search.toLowerCase()) ||
-      e.nik.includes(search) ||
-      e.username.toLowerCase().includes(search.toLowerCase())
-  );
+  const fmt = (n: unknown) => Number(n || 0).toLocaleString('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 })
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      {/* Title & Action */}
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Data Karyawan</h1>
-          <p className="text-slate-500 text-sm mt-1">Kelola data profil, jabatan, PTKP, dan password akun karyawan</p>
+          <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">Data Karyawan</h1>
+          <p className="text-xs text-slate-500 mt-0.5">Kelola data seluruh karyawan, status kepegawaian, dan akun.</p>
         </div>
         <button
-          onClick={() => setModalOpen(true)}
-          className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2.5 rounded-xl shadow-md shadow-blue-600/20 flex items-center gap-2 text-sm transition-all"
+          onClick={openAdd}
+          className="px-4 py-2.5 bg-[#0f172a] hover:bg-[#1e293b] text-white rounded-xl font-bold text-xs transition-all flex items-center gap-2 shadow-xs"
         >
-          <Plus className="w-4 h-4" />
-          Tambah Karyawan Baru
+          <Plus size={16} /> Tambah Karyawan Baru
         </button>
       </div>
 
-      {message && (
-        <div
-          className={`p-4 rounded-2xl text-sm font-medium flex items-center gap-2 ${
-            message.type === 'success'
-              ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
-              : 'bg-red-50 border border-red-200 text-red-800'
-          }`}
-        >
-          {message.type === 'success' ? <CheckCircle className="w-5 h-5 shrink-0 text-emerald-600" /> : <AlertCircle className="w-5 h-5 shrink-0 text-red-600" />}
-          <span>{message.text}</span>
-        </div>
-      )}
-
-      {/* Search Filter */}
-      <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm">
-        <div className="relative">
-          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+      {/* Filter Bar */}
+      <div className="flex gap-3 flex-wrap items-center bg-white border border-slate-200 p-4 rounded-2xl shadow-xs">
+        <div className="relative flex-1 min-w-[240px]">
+          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
           <input
             type="text"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Cari berdasarkan NIK, Nama, atau Username..."
-            className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2 text-sm text-slate-900 focus:bg-white focus:outline-none focus:border-blue-600"
+            onChange={e => { setSearch(e.target.value); setPagination(p => ({ ...p, page: 1 })) }}
+            placeholder="Cari nama, NIK, username..."
+            className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
           />
         </div>
+        <select
+          value={statusFilter}
+          onChange={e => { setStatusFilter(e.target.value); setPagination(p => ({ ...p, page: 1 })) }}
+          className="px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+        >
+          <option value="">Semua Status</option>
+          <option value="aktif">Status: Aktif</option>
+          <option value="nonaktif">Status: Nonaktif</option>
+        </select>
       </div>
 
-      {/* Table */}
-      <div className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm">
-        {loading ? (
-          <p className="text-sm text-slate-500">Memuat data karyawan...</p>
-        ) : filteredEmployees.length === 0 ? (
-          <p className="text-sm text-slate-500">Tidak ada karyawan ditemukan.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 font-semibold">
-                <tr>
-                  <th className="p-3">NIK & Nama</th>
-                  <th className="p-3">Username</th>
-                  <th className="p-3">Jabatan</th>
-                  <th className="p-3">Status Kerja</th>
-                  <th className="p-3">PTKP (Pajak)</th>
-                  <th className="p-3">No. Rekening</th>
-                  <th className="p-3 text-right">Aksi</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredEmployees.map((emp) => (
-                  <tr key={emp.id} className="hover:bg-slate-50/60">
-                    <td className="p-3">
-                      <p className="font-bold text-slate-900">{emp.name}</p>
-                      <p className="text-xs text-slate-500 font-mono">NIK: {emp.nik}</p>
-                    </td>
-                    <td className="p-3 font-mono text-slate-700">@{emp.username}</td>
-                    <td className="p-3 text-slate-800 font-medium">{emp.jabatan?.nama}</td>
-                    <td className="p-3">
-                      <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase ${
-                        emp.status_kepegawaian === 'tetap'
-                          ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                          : 'bg-amber-50 text-amber-700 border border-amber-200'
-                      }`}>
-                        {emp.status_kepegawaian}
-                      </span>
-                    </td>
-                    <td className="p-3 font-semibold text-slate-700">{emp.status_pernikahan}</td>
-                    <td className="p-3 font-mono text-slate-600 text-xs">{emp.bank_account_number}</td>
-                    <td className="p-3 text-right">
-                      <button
-                        onClick={() => { setSelectedEmpId(emp.id); setResetModalOpen(true); }}
-                        className="px-3 py-1 bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 rounded-lg text-xs font-semibold inline-flex items-center gap-1"
-                      >
-                        <Key className="w-3.5 h-3.5" /> Reset Pass
+      {/* Main Directory Table */}
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase text-[10px] font-bold tracking-wider">
+              <tr>
+                <th className="text-left px-6 py-3.5">Nama Karyawan</th>
+                <th className="text-left px-6 py-3.5">NIK</th>
+                <th className="text-left px-6 py-3.5">Jabatan</th>
+                <th className="text-left px-6 py-3.5">Status Kepegawaian</th>
+                <th className="text-center px-6 py-3.5">Status Aktif</th>
+                <th className="text-right px-6 py-3.5">Aksi</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {employees.map((emp) => (
+                <tr key={emp.id as number} className="hover:bg-slate-50/80 transition-colors">
+                  <td className="px-6 py-4 font-bold text-slate-900">
+                    <div>
+                      <p className="text-xs font-bold text-slate-900">{emp.name as string}</p>
+                      <p className="text-[10px] font-normal text-slate-400">@{emp.username as string}</p>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 text-slate-600 font-mono font-medium">{emp.nik as string}</td>
+                  <td className="px-6 py-4 font-bold text-slate-800">
+                    {(emp.jabatan as Record<string, unknown>)?.nama as string}
+                  </td>
+                  <td className="px-6 py-4 capitalize text-slate-600 font-medium">{emp.status_kepegawaian as string}</td>
+                  <td className="px-6 py-4 text-center">
+                    <span className={`badge ${emp.is_active ? 'badge-success' : 'badge-danger'}`}>
+                      {emp.is_active ? 'AKTIF' : 'NONAKTIF'}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 text-right">
+                    <div className="flex items-center justify-end gap-1.5">
+                      <button onClick={() => setShowDetail(emp)} title="Detail Karyawan" className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"><Eye size={15} /></button>
+                      <button onClick={() => openEdit(emp)} title="Edit Karyawan" className="p-1.5 rounded-lg hover:bg-slate-100 text-blue-600"><Edit size={15} /></button>
+                      <button onClick={() => resetPassword(emp.id as number)} title="Reset Password" className="p-1.5 rounded-lg hover:bg-slate-100 text-amber-600"><KeyRound size={15} /></button>
+                      <button onClick={() => toggleActive(emp.id as number, emp.is_active as boolean)} title={emp.is_active ? 'Nonaktifkan' : 'Aktifkan'} className="p-1.5 rounded-lg hover:bg-slate-100">
+                        {emp.is_active ? <UserX size={15} className="text-red-600" /> : <UserCheck size={15} className="text-emerald-600" />}
                       </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {employees.length === 0 && (
+                <tr><td colSpan={6} className="text-center py-10 text-slate-400">{loading ? 'Memuat data...' : 'Tidak ada data karyawan'}</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pagination Footer */}
+        {pagination.totalPages > 1 && (
+          <div className="px-6 py-3.5 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500">
+            <span>Menampilkan Hal {pagination.page} dari {pagination.totalPages} ({pagination.total} data)</span>
+            <div className="flex items-center gap-1">
+              <button disabled={pagination.page <= 1} onClick={() => setPagination(p => ({ ...p, page: p.page - 1 }))} className="p-1 rounded-lg hover:bg-slate-100 disabled:opacity-30"><ChevronLeft size={16} /></button>
+              <button disabled={pagination.page >= pagination.totalPages} onClick={() => setPagination(p => ({ ...p, page: p.page + 1 }))} className="p-1 rounded-lg hover:bg-slate-100 disabled:opacity-30"><ChevronRight size={16} /></button>
+            </div>
           </div>
         )}
       </div>
 
-      {/* Modal Create Employee */}
-      {modalOpen && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-lg w-full shadow-xl">
-            <h3 className="text-lg font-bold text-slate-900 mb-4">Tambah Karyawan Baru</h3>
-            <form onSubmit={handleCreate} className="space-y-3 text-sm">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">NIK Karyawan</label>
-                  <input type="text" required value={nik} onChange={(e) => setNik(e.target.value)} placeholder="317101..." className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Nama Lengkap</label>
-                  <input type="text" required value={name} onChange={(e) => setName(e.target.value)} placeholder="Nama" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900" />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Username Login</label>
-                  <input type="text" required value={username} onChange={(e) => setUsername(e.target.value)} placeholder="username" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Password</label>
-                  <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900" />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Jabatan</label>
-                <select required value={jabatanId} onChange={(e) => setJabatanId(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900">
-                  <option value="">Pilih Jabatan</option>
-                  {jabatanList.map((j) => (
-                    <option key={j.id} value={j.id}>{j.nama}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Status Kepegawaian</label>
-                  <select value={statusKepegawaian} onChange={(e) => setStatusKepegawaian(e.target.value as any)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900">
-                    <option value="tetap">Tetap</option>
-                    <option value="kontrak">Kontrak</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Status PTKP (Pajak)</label>
-                  <select value={statusPernikahan} onChange={(e) => setStatusPernikahan(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900">
-                    <option value="TK/0">TK/0 (Tidak Kawin, 0 Tanggungan)</option>
-                    <option value="K/0">K/0 (Kawin, 0 Tanggungan)</option>
-                    <option value="K/1">K/1 (Kawin, 1 Tanggungan)</option>
-                    <option value="K/2">K/2 (Kawin, 2 Tanggungan)</option>
-                    <option value="K/3">K/3 (Kawin, 3 Tanggungan)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">No. Rekening BNI</label>
-                <input type="text" required value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} placeholder="0123456789" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900" />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-2">
-                <button type="button" onClick={() => setModalOpen(false)} className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200">
-                  Batal
-                </button>
-                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-semibold">
-                  Simpan Karyawan
-                </button>
-              </div>
-            </form>
+      {/* Detail Modal */}
+      {showDetail && (
+        <div className="modal-overlay" onClick={() => setShowDetail(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center"><h3 className="text-sm font-bold text-slate-900">Detail Karyawan</h3><button onClick={() => setShowDetail(null)} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400">✕</button></div>
+            <div className="p-6 grid grid-cols-2 gap-4 text-xs">
+              {[
+                ['Nama Lengkap', showDetail.name], ['NIK', showDetail.nik], ['Username', showDetail.username], ['Jabatan', (showDetail.jabatan as Record<string, unknown>)?.nama],
+                ['Jenis Kelamin', showDetail.gender === 'L' ? 'Laki-laki' : 'Perempuan'], ['Tanggal Masuk', new Date(showDetail.join_date as string).toLocaleDateString('id-ID')],
+                ['Status Pernikahan', showDetail.status_pernikahan === 'K' ? 'Kawin' : 'Tidak Kawin'], ['Tanggungan', showDetail.jumlah_tanggungan],
+                ['No. Rekening BNI', showDetail.bank_account_number], ['Status Kepegawaian', showDetail.status_kepegawaian],
+                ['Gaji Pokok', fmt((showDetail.jabatan as Record<string, unknown>)?.gaji_pokok)], ['Status Aktif', showDetail.is_active ? 'Aktif' : 'Nonaktif'],
+              ].map(([label, val], i) => (
+                <div key={i}><p className="text-[11px] text-slate-500 font-semibold uppercase">{label as string}</p><p className="font-bold text-slate-900">{String(val)}</p></div>
+              ))}
+            </div>
           </div>
         </div>
       )}
 
-      {/* Modal Reset Password */}
-      {resetModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-sm w-full shadow-xl">
-            <h3 className="text-lg font-bold text-slate-900 mb-2">Reset Password Karyawan</h3>
-            <form onSubmit={handleResetPassword} className="space-y-4 text-sm">
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Password Baru</label>
-                <input
-                  type="password"
-                  required
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900"
-                />
-              </div>
-              <div className="flex justify-end gap-3">
-                <button type="button" onClick={() => setResetModalOpen(false)} className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl">
-                  Batal
-                </button>
-                <button type="submit" className="px-4 py-2 bg-amber-600 text-white rounded-xl hover:bg-amber-700 font-semibold">
-                  Update Password
-                </button>
+      {/* Form Modal */}
+      {showModal && (
+        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+          <div className="modal-content modal-content-lg" onClick={e => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center"><h3 className="text-sm font-bold text-slate-900">{editId ? 'Edit Data Karyawan' : 'Tambah Karyawan Baru'}</h3><button onClick={() => setShowModal(false)} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400">✕</button></div>
+            <form onSubmit={handleSubmit} className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              <div><label className="block text-xs font-semibold mb-1">Nama Lengkap *</label><input required value={form.name || ''} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none" /></div>
+              <div><label className="block text-xs font-semibold mb-1">NIK (16 digit) *</label><input required maxLength={16} pattern="[0-9]{16}" value={form.nik || ''} onChange={e => setForm(p => ({ ...p, nik: e.target.value.replace(/\D/g, '').slice(0, 16) }))} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 font-mono focus:outline-none" /></div>
+              <div><label className="block text-xs font-semibold mb-1">Username *</label><input required value={form.username || ''} onChange={e => setForm(p => ({ ...p, username: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none" /></div>
+              {!editId && <div><label className="block text-xs font-semibold mb-1">Password *</label><input required type="password" minLength={6} value={form.password || ''} onChange={e => setForm(p => ({ ...p, password: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none" /></div>}
+              <div><label className="block text-xs font-semibold mb-1">Jabatan *</label><select required value={form.jabatan_id || ''} onChange={e => setForm(p => ({ ...p, jabatan_id: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none"><option value="">Pilih Jabatan</option>{jabatanList.map((j) => <option key={j.id as number} value={j.id as number}>{j.nama as string}</option>)}</select></div>
+              <div><label className="block text-xs font-semibold mb-1">Jenis Kelamin *</label><select required value={form.gender || ''} onChange={e => setForm(p => ({ ...p, gender: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none"><option value="">Pilih</option><option value="L">Laki-laki</option><option value="P">Perempuan</option></select></div>
+              <div><label className="block text-xs font-semibold mb-1">Tanggal Masuk *</label><input required type="date" value={form.join_date || ''} onChange={e => setForm(p => ({ ...p, join_date: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none" /></div>
+              <div><label className="block text-xs font-semibold mb-1">Status Pernikahan *</label><select required value={form.status_pernikahan || ''} onChange={e => setForm(p => ({ ...p, status_pernikahan: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none"><option value="">Pilih</option><option value="TK">Tidak Kawin</option><option value="K">Kawin</option></select></div>
+              <div><label className="block text-xs font-semibold mb-1">Jumlah Tanggungan *</label><input required type="number" min={0} max={3} value={form.jumlah_tanggungan ?? ''} onChange={e => setForm(p => ({ ...p, jumlah_tanggungan: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none" /></div>
+              <div><label className="block text-xs font-semibold mb-1">No. Rekening BNI (10 digit) *</label><input required maxLength={10} pattern="[0-9]{10}" value={form.bank_account_number || ''} onChange={e => setForm(p => ({ ...p, bank_account_number: e.target.value.replace(/\D/g, '').slice(0, 10) }))} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 font-mono focus:outline-none" /></div>
+              <div><label className="block text-xs font-semibold mb-1">Status Kepegawaian *</label><select required value={form.status_kepegawaian || ''} onChange={e => setForm(p => ({ ...p, status_kepegawaian: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none"><option value="">Pilih</option><option value="tetap">Tetap</option><option value="kontrak">Kontrak</option></select></div>
+              {form.status_kepegawaian === 'kontrak' && <div><label className="block text-xs font-semibold mb-1">Durasi Kontrak (bulan) *</label><input required type="number" min={1} max={120} value={form.durasi_kontrak_bulan || ''} onChange={e => setForm(p => ({ ...p, durasi_kontrak_bulan: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none" /></div>}
+              <div className="md:col-span-2 flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-semibold hover:bg-slate-200 text-xs">Batal</button>
+                <button type="submit" disabled={submitting} className="px-6 py-2.5 rounded-xl bg-[#0f172a] text-white hover:bg-[#1e293b] font-bold text-xs transition-all disabled:opacity-50">{submitting ? 'Simpan...' : 'Simpan Karyawan'}</button>
               </div>
             </form>
           </div>
         </div>
       )}
     </div>
-  );
+  )
 }

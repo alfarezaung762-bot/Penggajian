@@ -1,53 +1,28 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/session';
-import { catatLog } from '@/lib/log-aktivitas';
+import { NextRequest } from 'next/server'
+import prisma from '@/lib/prisma'
+import { getSession } from '@/lib/session'
+import { successResponse, errorResponse, unauthorizedResponse, forbiddenResponse } from '@/lib/api-response'
 
+// PATCH — Lock/Kunci final periode penggajian (Admin/Owner only)
 export async function PATCH(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await getSession();
-  if (!session || session.role !== 'admin_owner') {
-    return NextResponse.json({ error: 'Akses ditolak (khusus Admin/Owner)' }, { status: 403 });
-  }
+  const session = await getSession()
+  if (!session || session.type !== 'account') return unauthorizedResponse()
+  if (session.role !== 'admin_owner') return forbiddenResponse('Hanya Admin/Owner yang berhak mengunci payroll')
 
-  const { id } = await params;
-  const periodeId = parseInt(id, 10);
+  const { id } = await params
+  const periodeId = parseInt(id)
 
-  try {
-    const oldPeriode = await prisma.periode_penggajian.findUnique({ where: { id: periodeId } });
-    if (!oldPeriode) {
-      return NextResponse.json({ error: 'Periode penggajian tidak ditemukan' }, { status: 404 });
-    }
+  const existing = await prisma.periode_penggajian.findUnique({ where: { id: periodeId } })
+  if (!existing) return errorResponse('Periode penggajian tidak ditemukan', 404)
+  if (existing.status === 'terkunci') return errorResponse('Periode penggajian sudah dikunci sebelumnya')
 
-    if (oldPeriode.status === 'terkunci') {
-      return NextResponse.json({ error: 'Periode penggajian ini sudah terkunci' }, { status: 400 });
-    }
+  const updated = await prisma.periode_penggajian.update({
+    where: { id: periodeId },
+    data: { status: 'terkunci' },
+  })
 
-    const updated = await prisma.periode_penggajian.update({
-      where: { id: periodeId },
-      data: {
-        status: 'terkunci',
-        dikunci_oleh: session.account_id ?? null,
-        dikunci_pada: new Date(),
-      },
-    });
-
-    if (session.account_id) {
-      await catatLog({
-        account_id: session.account_id,
-        aksi: 'kunci',
-        tabel_target: 'periode_penggajian',
-        id_target: periodeId,
-        nilai_lama: { status: oldPeriode.status },
-        nilai_baru: { status: 'terkunci' },
-      });
-    }
-
-    return NextResponse.json({ data: updated });
-  } catch (error) {
-    console.error('Error lock payroll:', error);
-    return NextResponse.json({ error: 'Gagal mengunci periode penggajian' }, { status: 500 });
-  }
+  return successResponse(updated)
 }

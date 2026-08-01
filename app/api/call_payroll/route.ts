@@ -1,48 +1,48 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/session';
-import { generatePayrollPeriod } from '@/lib/services/payroll-service';
+import { NextRequest } from 'next/server'
+import prisma from '@/lib/prisma'
+import { getSession } from '@/lib/session'
+import { processPayrollPeriode } from '@/lib/services/payroll-service'
+import { successResponse, errorResponse, unauthorizedResponse, forbiddenResponse } from '@/lib/api-response'
 
+// GET — List semua periode penggajian
 export async function GET() {
-  const session = await getSession();
-  if (!session || (session.role !== 'hrd' && session.role !== 'admin_owner')) {
-    return NextResponse.json({ error: 'Akses ditolak' }, { status: 403 });
-  }
+  const session = await getSession()
+  if (!session || session.type !== 'account') return unauthorizedResponse()
 
-  const periodeList = await prisma.periode_penggajian.findMany({
+  const list = await prisma.periode_penggajian.findMany({
     orderBy: [{ tahun: 'desc' }, { bulan: 'desc' }],
-  });
+    include: {
+      account: { select: { name: true } },
+      _count: { select: { slip_gaji: true } },
+    },
+  })
 
-  return NextResponse.json({ data: periodeList });
+  return successResponse(list)
 }
 
-export async function POST(request: Request) {
-  const session = await getSession();
-  if (!session || session.role !== 'admin_owner') {
-    return NextResponse.json({ error: 'Akses ditolak (khusus Admin/Owner)' }, { status: 403 });
-  }
+// POST — Memicu proses generate payroll baru
+export async function POST(request: NextRequest) {
+  const session = await getSession()
+  if (!session || session.type !== 'account') return unauthorizedResponse()
 
   try {
-    const { bulan, tahun } = await request.json();
+    const body = await request.json()
+    const bulan = parseInt(body.bulan)
+    const tahun = parseInt(body.tahun)
 
-    if (!bulan || !tahun) {
-      return NextResponse.json({ error: 'Bulan dan tahun wajib diisi' }, { status: 400 });
+    if (!bulan || !tahun || bulan < 1 || bulan > 12) {
+      return errorResponse('Bulan (1-12) dan tahun wajib diisi dengan benar')
     }
 
-    const result = await generatePayrollPeriod({
-      bulan: parseInt(bulan, 10),
-      tahun: parseInt(tahun, 10),
-      account_id: session.id,
-    });
+    const result = await processPayrollPeriode({
+      bulan,
+      tahun,
+      accountId: session.id,
+    })
 
-    return NextResponse.json({
-      data: {
-        message: 'Berhasil me-generate payroll periode',
-        ...result,
-      },
-    });
-  } catch (error: any) {
-    console.error('Error generate payroll:', error);
-    return NextResponse.json({ error: error.message || 'Gagal me-generate payroll' }, { status: 500 });
+    return successResponse(result, 201)
+  } catch (error) {
+    console.error('Call payroll error:', error)
+    return errorResponse('Gagal memproses penggajian', 500)
   }
 }

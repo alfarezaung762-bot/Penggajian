@@ -1,32 +1,33 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/session';
+import { NextRequest } from 'next/server'
+import prisma from '@/lib/prisma'
+import { getSession } from '@/lib/session'
+import { successResponse, errorResponse, unauthorizedResponse, forbiddenResponse } from '@/lib/api-response'
 
+// GET — List tunjangan insidental/lainnya
 export async function GET() {
-  const session = await getSession();
-  if (!session) {
-    return NextResponse.json({ error: 'Akses ditolak' }, { status: 403 });
-  }
+  const session = await getSession()
+  if (!session || session.type !== 'account') return unauthorizedResponse()
 
-  const tunjanganList = await prisma.tunjangan_lain.findMany({
-    include: { jabatan: true },
-    orderBy: { tanggal_pencairan: 'desc' },
-  });
+  const list = await prisma.tunjangan_lain.findMany({
+    include: { jabatan: { select: { nama: true } } },
+    orderBy: { id: 'desc' },
+  })
 
-  return NextResponse.json({ data: tunjanganList });
+  return successResponse(list)
 }
 
-export async function POST(request: Request) {
-  const session = await getSession();
-  if (!session || session.role !== 'admin_owner') {
-    return NextResponse.json({ error: 'Akses ditolak (khusus Admin/Owner)' }, { status: 403 });
-  }
+// POST — Tambah tunjangan insidental baru (Admin/Owner only)
+export async function POST(request: NextRequest) {
+  const session = await getSession()
+  if (!session || session.type !== 'account') return unauthorizedResponse()
+  if (session.role !== 'admin_owner') return forbiddenResponse('Hanya Admin/Owner yang dapat membuat tunjangan insidental')
 
   try {
-    const { nama, nominal, tanggal_pencairan, jabatan_target_id, status_aktif } = await request.json();
+    const body = await request.json()
+    const { nama, nominal, tanggal_pencairan, jabatan_id } = body
 
     if (!nama || !nominal || !tanggal_pencairan) {
-      return NextResponse.json({ error: 'Nama, nominal, dan tanggal pencairan wajib diisi' }, { status: 400 });
+      return errorResponse('Nama, nominal, dan tanggal pencairan wajib diisi')
     }
 
     const created = await prisma.tunjangan_lain.create({
@@ -34,14 +35,13 @@ export async function POST(request: Request) {
         nama,
         nominal: parseFloat(nominal),
         tanggal_pencairan: new Date(tanggal_pencairan),
-        jabatan_id: jabatan_target_id ? parseInt(jabatan_target_id, 10) : null,
-        status_aktif: status_aktif !== undefined ? status_aktif : true,
+        jabatan_id: jabatan_id ? parseInt(jabatan_id) : null,
       },
-    });
+    })
 
-    return NextResponse.json({ data: created }, { status: 201 });
+    return successResponse(created, 201)
   } catch (error) {
-    console.error('Error create tunjangan lain:', error);
-    return NextResponse.json({ error: 'Gagal membuat tunjangan lain' }, { status: 500 });
+    console.error('Create tunjangan lain error:', error)
+    return errorResponse('Gagal membuat tunjangan insidental', 500)
   }
 }

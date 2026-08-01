@@ -1,57 +1,67 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/session';
-import { catatLog } from '@/lib/log-aktivitas';
+import { NextRequest } from 'next/server'
+import prisma from '@/lib/prisma'
+import { getSession } from '@/lib/session'
+import { createJabatanSchema } from '@/lib/validations/jabatan-schema'
+import { catatLog } from '@/lib/log-aktivitas'
+import { successResponse, errorResponse, unauthorizedResponse, forbiddenResponse } from '@/lib/api-response'
 
+// GET — list semua jabatan (HRD & Admin)
 export async function GET() {
-  const session = await getSession();
-  if (!session) {
-    return NextResponse.json({ error: 'Akses ditolak' }, { status: 403 });
+  const session = await getSession()
+  if (!session || session.type !== 'account') {
+    return unauthorizedResponse()
   }
 
   const jabatanList = await prisma.jabatan.findMany({
-    orderBy: { created_at: 'desc' },
-  });
+    orderBy: { nama: 'asc' },
+    include: { _count: { select: { employee: true } } },
+  })
 
-  return NextResponse.json({ data: jabatanList });
+  return successResponse(jabatanList)
 }
 
-export async function POST(request: Request) {
-  const session = await getSession();
-  // Pola maker-checker: HRD adalah maker (write)
-  if (!session || (session.role !== 'hrd' && session.role !== 'admin_owner')) {
-    return NextResponse.json({ error: 'Akses ditolak' }, { status: 403 });
+// POST — tambah jabatan baru (khusus HRD)
+export async function POST(request: NextRequest) {
+  const session = await getSession()
+  if (!session || session.type !== 'account') {
+    return unauthorizedResponse()
+  }
+  if (session.role !== 'hrd') {
+    return forbiddenResponse('Hanya HRD yang dapat menambah jabatan')
   }
 
   try {
-    const { nama, gaji_pokok, tunjangan_jabatan, uang_makan } = await request.json();
-
-    if (!nama || gaji_pokok === undefined) {
-      return NextResponse.json({ error: 'Nama jabatan dan gaji pokok wajib diisi' }, { status: 400 });
+    const body = await request.json()
+    const result = createJabatanSchema.safeParse(body)
+    if (!result.success) {
+      return errorResponse(result.error.issues[0]?.message || 'Input tidak valid')
     }
 
-    const newJabatan = await prisma.jabatan.create({
+    const jabatan = await prisma.jabatan.create({
       data: {
-        nama,
-        gaji_pokok: parseFloat(gaji_pokok),
-        tunjangan_jabatan: tunjangan_jabatan ? parseFloat(tunjangan_jabatan) : 0,
-        uang_makan: uang_makan ? parseFloat(uang_makan) : 0,
+        nama: result.data.nama,
+        gaji_pokok: result.data.gaji_pokok,
+        tunjangan_jabatan: result.data.tunjangan_jabatan ?? 0,
+        uang_makan: result.data.uang_makan ?? 0,
       },
-    });
+    })
 
-    if (session.account_id) {
-      await catatLog({
-        account_id: session.account_id,
-        aksi: 'buat',
-        tabel_target: 'jabatan',
-        id_target: newJabatan.id,
-        nilai_baru: { nama, gaji_pokok, tunjangan_jabatan, uang_makan },
-      });
-    }
+    await catatLog({
+      accountId: session.id,
+      aksi: 'buat',
+      tabelTarget: 'jabatan',
+      idTarget: jabatan.id,
+      nilaiBaru: {
+        nama: jabatan.nama,
+        gaji_pokok: Number(jabatan.gaji_pokok),
+        tunjangan_jabatan: Number(jabatan.tunjangan_jabatan),
+        uang_makan: Number(jabatan.uang_makan),
+      },
+    })
 
-    return NextResponse.json({ data: newJabatan }, { status: 201 });
+    return successResponse(jabatan, 201)
   } catch (error) {
-    console.error('Error create jabatan:', error);
-    return NextResponse.json({ error: 'Gagal membuat data jabatan' }, { status: 500 });
+    console.error('Create jabatan error:', error)
+    return errorResponse('Gagal menambah jabatan', 500)
   }
 }

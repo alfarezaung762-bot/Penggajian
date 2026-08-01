@@ -1,96 +1,83 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/session';
-import bcrypt from 'bcryptjs';
-import { catatLog } from '@/lib/log-aktivitas';
+import { NextRequest } from 'next/server'
+import bcrypt from 'bcryptjs'
+import prisma from '@/lib/prisma'
+import { getSession } from '@/lib/session'
+import { updateAccountSchema } from '@/lib/validations/auth-schema'
+import { successResponse, errorResponse, unauthorizedResponse, forbiddenResponse, notFoundResponse } from '@/lib/api-response'
 
+// PATCH — edit akun (admin_owner only)
 export async function PATCH(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await getSession();
-  if (!session || session.role !== 'admin_owner') {
-    return NextResponse.json({ error: 'Akses ditolak' }, { status: 403 });
-  }
+  const session = await getSession()
+  if (!session || session.type !== 'account') return unauthorizedResponse()
+  if (session.role !== 'admin_owner') return forbiddenResponse()
 
-  const { id } = await params;
-  const accountId = parseInt(id, 10);
-  if (isNaN(accountId)) {
-    return NextResponse.json({ error: 'ID tidak valid' }, { status: 400 });
-  }
+  const { id } = await params
+  const accountId = parseInt(id)
+  if (isNaN(accountId)) return errorResponse('ID tidak valid')
 
   try {
-    const body = await request.json();
-    const oldAccount = await prisma.account.findUnique({ where: { id: accountId } });
-    if (!oldAccount) {
-      return NextResponse.json({ error: 'Akun tidak ditemukan' }, { status: 404 });
+    const existing = await prisma.account.findUnique({ where: { id: accountId } })
+    if (!existing) return notFoundResponse('Akun tidak ditemukan')
+
+    const body = await request.json()
+    const result = updateAccountSchema.safeParse(body)
+    if (!result.success) return errorResponse(result.error.issues[0]?.message || 'Input tidak valid')
+
+    // Cek username unik jika diubah
+    if (result.data.username && result.data.username !== existing.username) {
+      const dup = await prisma.account.findUnique({ where: { username: result.data.username } })
+      if (dup) return errorResponse('Username sudah digunakan')
     }
 
-    const updateData: any = {};
-    if (body.name) updateData.name = body.name;
-    if (body.role) updateData.role = body.role;
-    if (body.is_active !== undefined) updateData.is_active = body.is_active;
-    if (body.password) {
-      updateData.password_hash = await bcrypt.hash(body.password, 10);
+    const updateData: Record<string, unknown> = { ...result.data }
+    if (result.data.password) {
+      updateData.password_hash = await bcrypt.hash(result.data.password, 10)
+      delete updateData.password
     }
 
-    const updatedAccount = await prisma.account.update({
+    const updated = await prisma.account.update({
       where: { id: accountId },
       data: updateData,
-    });
+      select: { id: true, name: true, username: true, role: true, is_active: true, created_at: true },
+    })
 
-    await catatLog({
-      account_id: session.id,
-      aksi: 'ubah',
-      tabel_target: 'account',
-      id_target: accountId,
-      nilai_lama: { name: oldAccount.name, role: oldAccount.role, is_active: oldAccount.is_active },
-      nilai_baru: { name: updatedAccount.name, role: updatedAccount.role, is_active: updatedAccount.is_active },
-    });
-
-    return NextResponse.json({ data: updatedAccount });
+    return successResponse(updated)
   } catch (error) {
-    console.error('Error update account:', error);
-    return NextResponse.json({ error: 'Gagal memperbarui akun' }, { status: 500 });
+    console.error('Update account error:', error)
+    return errorResponse('Gagal mengubah akun', 500)
   }
 }
 
+// DELETE — nonaktifkan akun (soft delete)
 export async function DELETE(
-  request: Request,
+  _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await getSession();
-  if (!session || session.role !== 'admin_owner') {
-    return NextResponse.json({ error: 'Akses ditolak' }, { status: 403 });
-  }
+  const session = await getSession()
+  if (!session || session.type !== 'account') return unauthorizedResponse()
+  if (session.role !== 'admin_owner') return forbiddenResponse()
 
-  const { id } = await params;
-  const accountId = parseInt(id, 10);
+  const { id } = await params
+  const accountId = parseInt(id)
+  if (isNaN(accountId)) return errorResponse('ID tidak valid')
+
+  if (accountId === session.id) return errorResponse('Tidak dapat menonaktifkan akun sendiri')
 
   try {
-    const oldAccount = await prisma.account.findUnique({ where: { id: accountId } });
-    if (!oldAccount) {
-      return NextResponse.json({ error: 'Akun tidak ditemukan' }, { status: 404 });
-    }
+    const existing = await prisma.account.findUnique({ where: { id: accountId } })
+    if (!existing) return notFoundResponse('Akun tidak ditemukan')
 
-    // Soft delete (is_active = false)
-    const updatedAccount = await prisma.account.update({
+    await prisma.account.update({
       where: { id: accountId },
       data: { is_active: false },
-    });
+    })
 
-    await catatLog({
-      account_id: session.id,
-      aksi: 'hapus',
-      tabel_target: 'account',
-      id_target: accountId,
-      nilai_lama: { is_active: true },
-      nilai_baru: { is_active: false },
-    });
-
-    return NextResponse.json({ data: updatedAccount });
+    return successResponse({ message: 'Akun berhasil dinonaktifkan' })
   } catch (error) {
-    console.error('Error deactivate account:', error);
-    return NextResponse.json({ error: 'Gagal menonaktifkan akun' }, { status: 500 });
+    console.error('Delete account error:', error)
+    return errorResponse('Gagal menonaktifkan akun', 500)
   }
 }

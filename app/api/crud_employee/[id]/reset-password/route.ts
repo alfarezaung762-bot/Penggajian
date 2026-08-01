@@ -1,35 +1,39 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/session';
-import bcrypt from 'bcryptjs';
+import { NextRequest } from 'next/server'
+import bcrypt from 'bcryptjs'
+import prisma from '@/lib/prisma'
+import { getSession } from '@/lib/session'
+import { resetPasswordSchema } from '@/lib/validations/auth-schema'
+import { successResponse, errorResponse, unauthorizedResponse, notFoundResponse } from '@/lib/api-response'
 
+// PATCH — reset password karyawan (HRD/Admin)
 export async function PATCH(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await getSession();
-  if (!session || (session.role !== 'hrd' && session.role !== 'admin_owner')) {
-    return NextResponse.json({ error: 'Akses ditolak' }, { status: 403 });
-  }
+  const session = await getSession()
+  if (!session || session.type !== 'account') return unauthorizedResponse()
 
-  const { id } = await params;
-  const empId = parseInt(id, 10);
+  const { id } = await params
+  const employeeId = parseInt(id)
+  if (isNaN(employeeId)) return errorResponse('ID tidak valid')
 
   try {
-    const { new_password } = await request.json();
-    if (!new_password || new_password.length < 6) {
-      return NextResponse.json({ error: 'Password baru minimal 6 karakter' }, { status: 400 });
-    }
+    const existing = await prisma.employee.findUnique({ where: { id: employeeId } })
+    if (!existing) return notFoundResponse('Karyawan tidak ditemukan')
 
-    const password_hash = await bcrypt.hash(new_password, 10);
-    const updated = await prisma.employee.update({
-      where: { id: empId },
-      data: { password_hash },
-    });
+    const body = await request.json()
+    const result = resetPasswordSchema.safeParse(body)
+    if (!result.success) return errorResponse(result.error.issues[0]?.message || 'Input tidak valid')
 
-    return NextResponse.json({ data: { message: 'Password karyawan berhasil direset' } });
+    const hashedPassword = await bcrypt.hash(result.data.password_baru, 10)
+    await prisma.employee.update({
+      where: { id: employeeId },
+      data: { password_hash: hashedPassword },
+    })
+
+    return successResponse({ message: 'Password karyawan berhasil direset' })
   } catch (error) {
-    console.error('Error reset password employee:', error);
-    return NextResponse.json({ error: 'Gagal mereset password karyawan' }, { status: 500 });
+    console.error('Reset password error:', error)
+    return errorResponse('Gagal mereset password', 500)
   }
 }

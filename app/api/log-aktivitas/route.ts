@@ -1,53 +1,71 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/session';
+import { NextRequest } from 'next/server'
+import prisma from '@/lib/prisma'
+import { getSession } from '@/lib/session'
+import { successResponse, unauthorizedResponse } from '@/lib/api-response'
 
-export async function GET(request: Request) {
-  const session = await getSession();
-  if (!session || session.role !== 'admin_owner') {
-    return NextResponse.json({ error: 'Akses ditolak (khusus Admin/Owner)' }, { status: 403 });
-  }
+export async function GET(request: NextRequest) {
+  const session = await getSession()
+  if (!session || session.type !== 'account') return unauthorizedResponse()
 
-  const { searchParams } = new URL(request.url);
-  const account_id = searchParams.get('account_id');
-  const aksi = searchParams.get('aksi');
-  const tabel_target = searchParams.get('tabel_target');
-  const startDate = searchParams.get('start_date');
-  const endDate = searchParams.get('end_date');
-  const preset = searchParams.get('preset');
+  const url = request.nextUrl
+  const page = parseInt(url.searchParams.get('page') || '1')
+  const limit = parseInt(url.searchParams.get('limit') || '50')
+  const aksi = url.searchParams.get('aksi')
+  const tabel = url.searchParams.get('tabel')
+  const accountId = url.searchParams.get('account_id')
+  const startDate = url.searchParams.get('start_date') || url.searchParams.get('tanggal_mulai')
+  const endDate = url.searchParams.get('end_date') || url.searchParams.get('tanggal_selesai')
 
-  const whereClause: any = {};
-
-  if (account_id) {
-    whereClause.account_id = parseInt(account_id, 10);
-  }
+  const where: Record<string, unknown> = {}
 
   if (aksi) {
-    whereClause.aksi = aksi;
+    where.aksi = aksi
   }
 
-  if (tabel_target) {
-    whereClause.tabel_target = tabel_target;
+  if (tabel) {
+    if (tabel.includes(',')) {
+      where.tabel_target = { in: tabel.split(',').map(t => t.trim()) }
+    } else {
+      where.tabel_target = tabel
+    }
   }
 
-  if (startDate || endDate) {
-    whereClause.created_at = {};
-    if (startDate) whereClause.created_at.gte = new Date(startDate);
-    if (endDate) whereClause.created_at.lte = new Date(endDate);
+  if (accountId) {
+    where.account_id = parseInt(accountId)
   }
 
-  // Preset "Perubahan Gaji & Jabatan": tabel_target IN ('jabatan', 'jenis_potongan') dan aksi = 'ubah'
-  if (preset === 'perubahan_gaji_jabatan') {
-    whereClause.tabel_target = { in: ['jabatan', 'jenis_potongan'] };
-    whereClause.aksi = 'ubah';
+  if (startDate && endDate) {
+    const start = new Date(startDate)
+    start.setHours(0, 0, 0, 0)
+    const end = new Date(endDate)
+    end.setHours(23, 59, 59, 999)
+    where.created_at = { gte: start, lte: end }
+  } else if (startDate) {
+    const start = new Date(startDate)
+    start.setHours(0, 0, 0, 0)
+    const end = new Date(startDate)
+    end.setHours(23, 59, 59, 999)
+    where.created_at = { gte: start, lte: end }
   }
 
-  const logs = await prisma.log_aktivitas.findMany({
-    where: whereClause,
-    include: { account: true },
-    orderBy: { created_at: 'desc' },
-    take: 100,
-  });
+  const [logs, total, accounts] = await Promise.all([
+    prisma.log_aktivitas.findMany({
+      where,
+      include: { account: { select: { id: true, name: true, username: true, role: true } } },
+      orderBy: { created_at: 'desc' },
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+    prisma.log_aktivitas.count({ where }),
+    prisma.account.findMany({
+      select: { id: true, name: true, username: true, role: true },
+      orderBy: { name: 'asc' }
+    })
+  ])
 
-  return NextResponse.json({ data: logs });
+  return successResponse({
+    logs,
+    accounts,
+    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+  })
 }

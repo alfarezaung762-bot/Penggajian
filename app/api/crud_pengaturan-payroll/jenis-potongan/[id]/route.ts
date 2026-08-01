@@ -1,99 +1,64 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/session';
-import { catatLog } from '@/lib/log-aktivitas';
+import { NextRequest } from 'next/server'
+import prisma from '@/lib/prisma'
+import { getSession } from '@/lib/session'
+import { updatePotonganSchema } from '@/lib/validations/potongan-schema'
+import { successResponse, errorResponse, unauthorizedResponse } from '@/lib/api-response'
 
+// PATCH — Edit jenis potongan
 export async function PATCH(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await getSession();
-  if (!session || (session.role !== 'hrd' && session.role !== 'admin_owner')) {
-    return NextResponse.json({ error: 'Akses ditolak' }, { status: 403 });
-  }
+  const session = await getSession()
+  if (!session || session.type !== 'account') return unauthorizedResponse()
 
-  const { id } = await params;
-  const potId = parseInt(id, 10);
+  const { id } = await params
+  const potonganId = parseInt(id)
 
   try {
-    const oldPot = await prisma.jenis_potongan.findUnique({ where: { id: potId } });
-    if (!oldPot) {
-      return NextResponse.json({ error: 'Jenis potongan tidak ditemukan' }, { status: 404 });
-    }
-
-    const body = await request.json();
-    const updateData: any = {};
-    if (body.nama) updateData.nama = body.nama;
-    if (body.kategori) updateData.kategori = body.kategori;
-    if (body.mode_hitung) updateData.mode_hitung = body.mode_hitung;
-    if (body.tipe_nilai) updateData.tipe_nilai = body.tipe_nilai;
-    if (body.nilai_default !== undefined) updateData.nilai_default = parseFloat(body.nilai_default);
-    if (body.status_aktif !== undefined) updateData.status_aktif = body.status_aktif;
+    const body = await request.json()
+    const result = updatePotonganSchema.safeParse(body)
+    if (!result.success) return errorResponse(result.error.issues[0]?.message || 'Input tidak valid')
 
     const updated = await prisma.jenis_potongan.update({
-      where: { id: potId },
-      data: updateData,
-    });
+      where: { id: potonganId },
+      data: {
+        ...(result.data.nama && { nama: result.data.nama }),
+        ...(result.data.kategori && { kategori: result.data.kategori as 'bpjs' | 'pajak' | 'kehadiran' | 'kustom' }),
+        ...(result.data.mode_hitung && { mode_hitung: result.data.mode_hitung as 'otomatis' | 'manual' }),
+        ...(result.data.tipe_nilai && { tipe_nilai: result.data.tipe_nilai as 'nominal' | 'persen' }),
+        ...(result.data.nilai_default !== undefined && result.data.nilai_default !== null && { nilai_default: result.data.nilai_default }),
+        ...(result.data.status_aktif !== undefined && { status_aktif: result.data.status_aktif }),
+      },
+    })
 
-    if (session.account_id) {
-      await catatLog({
-        account_id: session.account_id,
-        aksi: 'ubah',
-        tabel_target: 'jenis_potongan',
-        id_target: potId,
-        nilai_lama: {
-          nama: oldPot.nama,
-          nilai_default: Number(oldPot.nilai_default),
-          status_aktif: oldPot.status_aktif,
-        },
-        nilai_baru: {
-          nama: updated.nama,
-          nilai_default: Number(updated.nilai_default),
-          status_aktif: updated.status_aktif,
-        },
-      });
-    }
-
-    return NextResponse.json({ data: updated });
+    return successResponse(updated)
   } catch (error) {
-    console.error('Error update jenis potongan:', error);
-    return NextResponse.json({ error: 'Gagal memperbarui jenis potongan' }, { status: 500 });
+    console.error('Update jenis potongan error:', error)
+    return errorResponse('Gagal memperbarui jenis potongan', 500)
   }
 }
 
+// DELETE — Nonaktifkan / Hapus jenis potongan
 export async function DELETE(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await getSession();
-  if (!session || (session.role !== 'hrd' && session.role !== 'admin_owner')) {
-    return NextResponse.json({ error: 'Akses ditolak' }, { status: 403 });
-  }
+  const session = await getSession()
+  if (!session || session.type !== 'account') return unauthorizedResponse()
 
-  const { id } = await params;
-  const potId = parseInt(id, 10);
+  const { id } = await params
+  const potonganId = parseInt(id)
 
   try {
-    const oldPot = await prisma.jenis_potongan.findUnique({ where: { id: potId } });
-    if (!oldPot) {
-      return NextResponse.json({ error: 'Jenis potongan tidak ditemukan' }, { status: 404 });
-    }
+    const updated = await prisma.jenis_potongan.update({
+      where: { id: potonganId },
+      data: { status_aktif: false },
+    })
 
-    await prisma.jenis_potongan.delete({ where: { id: potId } });
-
-    if (session.account_id) {
-      await catatLog({
-        account_id: session.account_id,
-        aksi: 'hapus',
-        tabel_target: 'jenis_potongan',
-        id_target: potId,
-        nilai_lama: { nama: oldPot.nama },
-      });
-    }
-
-    return NextResponse.json({ data: { message: 'Jenis potongan berhasil dihapus' } });
+    return successResponse(updated)
   } catch (error) {
-    console.error('Error delete jenis potongan:', error);
-    return NextResponse.json({ error: 'Gagal menghapus jenis potongan' }, { status: 500 });
+    console.error('Delete jenis potongan error:', error)
+    return errorResponse('Gagal menghapus jenis potongan', 500)
   }
 }

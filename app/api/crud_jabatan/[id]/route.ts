@@ -1,99 +1,104 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/session';
-import { catatLog } from '@/lib/log-aktivitas';
+import { NextRequest } from 'next/server'
+import prisma from '@/lib/prisma'
+import { getSession } from '@/lib/session'
+import { updateJabatanSchema } from '@/lib/validations/jabatan-schema'
+import { catatLog } from '@/lib/log-aktivitas'
+import { successResponse, errorResponse, unauthorizedResponse, forbiddenResponse, notFoundResponse } from '@/lib/api-response'
 
+// PATCH — update jabatan (khusus HRD)
 export async function PATCH(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await getSession();
-  if (!session || (session.role !== 'hrd' && session.role !== 'admin_owner')) {
-    return NextResponse.json({ error: 'Akses ditolak' }, { status: 403 });
-  }
+  const session = await getSession()
+  if (!session || session.type !== 'account') return unauthorizedResponse()
+  if (session.role !== 'hrd') return forbiddenResponse('Hanya HRD yang dapat mengubah jabatan')
 
-  const { id } = await params;
-  const jabatanId = parseInt(id, 10);
+  const { id } = await params
+  const jabatanId = parseInt(id)
+  if (isNaN(jabatanId)) return errorResponse('ID tidak valid')
 
   try {
-    const oldJabatan = await prisma.jabatan.findUnique({ where: { id: jabatanId } });
-    if (!oldJabatan) {
-      return NextResponse.json({ error: 'Jabatan tidak ditemukan' }, { status: 404 });
-    }
+    const existing = await prisma.jabatan.findUnique({ where: { id: jabatanId } })
+    if (!existing) return notFoundResponse('Jabatan tidak ditemukan')
 
-    const body = await request.json();
-    const updateData: any = {};
-    if (body.nama) updateData.nama = body.nama;
-    if (body.gaji_pokok !== undefined) updateData.gaji_pokok = parseFloat(body.gaji_pokok);
-    if (body.tunjangan_jabatan !== undefined) updateData.tunjangan_jabatan = parseFloat(body.tunjangan_jabatan);
-    if (body.uang_makan !== undefined) updateData.uang_makan = parseFloat(body.uang_makan);
+    const body = await request.json()
+    const result = updateJabatanSchema.safeParse(body)
+    if (!result.success) return errorResponse(result.error.issues[0]?.message || 'Input tidak valid')
 
     const updated = await prisma.jabatan.update({
       where: { id: jabatanId },
-      data: updateData,
-    });
+      data: result.data,
+    })
 
-    if (session.account_id) {
-      await catatLog({
-        account_id: session.account_id,
-        aksi: 'ubah',
-        tabel_target: 'jabatan',
-        id_target: jabatanId,
-        nilai_lama: {
-          nama: oldJabatan.nama,
-          gaji_pokok: Number(oldJabatan.gaji_pokok),
-          tunjangan_jabatan: Number(oldJabatan.tunjangan_jabatan),
-          uang_makan: Number(oldJabatan.uang_makan),
-        },
-        nilai_baru: {
-          nama: updated.nama,
-          gaji_pokok: Number(updated.gaji_pokok),
-          tunjangan_jabatan: Number(updated.tunjangan_jabatan),
-          uang_makan: Number(updated.uang_makan),
-        },
-      });
-    }
+    await catatLog({
+      accountId: session.id,
+      aksi: 'ubah',
+      tabelTarget: 'jabatan',
+      idTarget: jabatanId,
+      nilaiLama: {
+        nama: existing.nama,
+        gaji_pokok: Number(existing.gaji_pokok),
+        tunjangan_jabatan: Number(existing.tunjangan_jabatan),
+        uang_makan: Number(existing.uang_makan),
+      },
+      nilaiBaru: {
+        nama: updated.nama,
+        gaji_pokok: Number(updated.gaji_pokok),
+        tunjangan_jabatan: Number(updated.tunjangan_jabatan),
+        uang_makan: Number(updated.uang_makan),
+      },
+    })
 
-    return NextResponse.json({ data: updated });
+    return successResponse(updated)
   } catch (error) {
-    console.error('Error update jabatan:', error);
-    return NextResponse.json({ error: 'Gagal memperbarui jabatan' }, { status: 500 });
+    console.error('Update jabatan error:', error)
+    return errorResponse('Gagal mengubah jabatan', 500)
   }
 }
 
+// DELETE — hapus jabatan (khusus HRD)
 export async function DELETE(
-  request: Request,
+  _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await getSession();
-  if (!session || (session.role !== 'hrd' && session.role !== 'admin_owner')) {
-    return NextResponse.json({ error: 'Akses ditolak' }, { status: 403 });
-  }
+  const session = await getSession()
+  if (!session || session.type !== 'account') return unauthorizedResponse()
+  if (session.role !== 'hrd') return forbiddenResponse('Hanya HRD yang dapat menghapus jabatan')
 
-  const { id } = await params;
-  const jabatanId = parseInt(id, 10);
+  const { id } = await params
+  const jabatanId = parseInt(id)
+  if (isNaN(jabatanId)) return errorResponse('ID tidak valid')
 
   try {
-    const oldJabatan = await prisma.jabatan.findUnique({ where: { id: jabatanId } });
-    if (!oldJabatan) {
-      return NextResponse.json({ error: 'Jabatan tidak ditemukan' }, { status: 404 });
+    const existing = await prisma.jabatan.findUnique({
+      where: { id: jabatanId },
+      include: { _count: { select: { employee: true } } },
+    })
+    if (!existing) return notFoundResponse('Jabatan tidak ditemukan')
+
+    if (existing._count.employee > 0) {
+      return errorResponse(`Jabatan masih digunakan oleh ${existing._count.employee} karyawan. Pindahkan karyawan terlebih dahulu.`)
     }
 
-    await prisma.jabatan.delete({ where: { id: jabatanId } });
+    await prisma.jabatan.delete({ where: { id: jabatanId } })
 
-    if (session.account_id) {
-      await catatLog({
-        account_id: session.account_id,
-        aksi: 'hapus',
-        tabel_target: 'jabatan',
-        id_target: jabatanId,
-        nilai_lama: { nama: oldJabatan.nama, gaji_pokok: Number(oldJabatan.gaji_pokok) },
-      });
-    }
+    await catatLog({
+      accountId: session.id,
+      aksi: 'hapus',
+      tabelTarget: 'jabatan',
+      idTarget: jabatanId,
+      nilaiLama: {
+        nama: existing.nama,
+        gaji_pokok: Number(existing.gaji_pokok),
+        tunjangan_jabatan: Number(existing.tunjangan_jabatan),
+        uang_makan: Number(existing.uang_makan),
+      },
+    })
 
-    return NextResponse.json({ data: { message: 'Jabatan berhasil dihapus' } });
+    return successResponse({ message: 'Jabatan berhasil dihapus' })
   } catch (error) {
-    console.error('Error delete jabatan:', error);
-    return NextResponse.json({ error: 'Gagal menghapus jabatan' }, { status: 500 });
+    console.error('Delete jabatan error:', error)
+    return errorResponse('Gagal menghapus jabatan', 500)
   }
 }

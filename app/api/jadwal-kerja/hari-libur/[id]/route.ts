@@ -1,24 +1,24 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/session';
+import { NextRequest } from 'next/server'
+import prisma from '@/lib/prisma'
+import { getSession } from '@/lib/session'
+import { successResponse, errorResponse, unauthorizedResponse, forbiddenResponse, notFoundResponse } from '@/lib/api-response'
 
+// DELETE — hapus hari libur
 export async function DELETE(
-  request: Request,
+  _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await getSession();
-  if (!session || (session.role !== 'hrd' && session.role !== 'admin_owner')) {
-    return NextResponse.json({ error: 'Akses ditolak' }, { status: 403 });
-  }
+  const session = await getSession()
+  if (!session || session.type !== 'account') return unauthorizedResponse()
+  if (session.role !== 'hrd' && session.role !== 'admin_owner') return forbiddenResponse()
 
-  const { id } = await params;
-  const liburId = parseInt(id, 10);
+  const { id } = await params
+  const hariLiburId = parseInt(id)
+  if (isNaN(hariLiburId)) return errorResponse('ID tidak valid')
 
-  try {
-    await prisma.hari_libur.delete({ where: { id: liburId } });
-    return NextResponse.json({ data: { message: 'Hari libur berhasil dihapus' } });
-  } catch (error) {
-    console.error('Error delete hari libur:', error);
-    return NextResponse.json({ error: 'Gagal menghapus hari libur' }, { status: 500 });
-  }
+  const existing = await prisma.hari_libur.findUnique({ where: { id: hariLiburId } })
+  if (!existing) return notFoundResponse('Hari libur tidak ditemukan')
+
+  await prisma.hari_libur.delete({ where: { id: hariLiburId } })
+  return successResponse({ message: 'Hari libur berhasil dihapus' })
 }

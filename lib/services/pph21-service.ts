@@ -1,55 +1,69 @@
 /**
- * Calculator PPh 21 berdasarkan PTKP (Status Pernikahan & Jumlah Tanggungan)
+ * Service Kalkulasi PTKP dan PPh 21 Karyawan
+ * Mengacu pada Bagian 3, Poin 4 Dokumen Alur Sistem
  */
 
-export function calculatePTKP(statusPernikahan: 'TK' | 'K', jumlahTanggungan: number): number {
-  const baseTK = 54000000; // PTKP dasar Wajib Pajak Sendiri
-  const kawinBonus = statusPernikahan === 'K' ? 4500000 : 0;
-  const tanggunganBonus = Math.min(Math.max(0, jumlahTanggungan), 3) * 4500000;
-  return baseTK + kawinBonus + tanggunganBonus;
+const PTKP_BASE = 54000000 // TK/0 = Rp 54.000.000 per tahun
+const PTKP_KAWIN_ADD = 4500000 // Tambahan status menikah = Rp 4.500.000 per tahun
+const PTKP_TANGGUNGAN_ADD = 4500000 // Tambahan per tanggungan (maks 3) = Rp 4.500.000 per tahun
+
+export interface PPh21Input {
+  gajiBrutoBulanan: number
+  statusPernikahan: string // 'menikah' | 'lajang' | 'duda_janda'
+  jumlahTanggungan: number
 }
 
-export function calculatePPh21Monthly(gajiBrutoBulanan: number, statusPernikahan: 'TK' | 'K', jumlahTanggungan: number): number {
-  const brutoTahunan = gajiBrutoBulanan * 12;
-  const ptkp = calculatePTKP(statusPernikahan, jumlahTanggungan);
-  const pkpTahunan = brutoTahunan - ptkp;
+export function hitungPTKP(statusPernikahan: string, jumlahTanggungan: number): number {
+  let ptkp = PTKP_BASE
+  if (statusPernikahan === 'menikah') {
+    ptkp += PTKP_KAWIN_ADD
+  }
+  const tanggunganEfektif = Math.min(Math.max(0, jumlahTanggungan), 3)
+  ptkp += tanggunganEfektif * PTKP_TANGGUNGAN_ADD
+  return ptkp
+}
 
-  if (pkpTahunan <= 0) return 0;
+export function hitungPPh21Bulanan(input: PPh21Input): number {
+  const { gajiBrutoBulanan, statusPernikahan, jumlahTanggungan } = input
 
-  // Skema Tarif Progresif UU HPP Pasal 17
-  let sisaPKP = pkpTahunan;
-  let pphTahunan = 0;
+  // Biaya Jabatan 5% dari Gaji Bruto (Maks Rp 500.000 per bulan)
+  const biayaJabatan = Math.min(gajiBrutoBulanan * 0.05, 500000)
+  const netoBulanan = gajiBrutoBulanan - biayaJabatan
+  const netoTahunan = netoBulanan * 12
 
-  // Lapis 1: 0 - 60 Juta (5%)
-  const layer1 = Math.min(sisaPKP, 60000000);
-  pphTahunan += layer1 * 0.05;
-  sisaPKP -= layer1;
+  const ptkp = hitungPTKP(statusPernikahan, jumlahTanggungan)
+  const pkp = Math.max(0, netoTahunan - ptkp)
 
-  if (sisaPKP > 0) {
-    // Lapis 2: > 60 Juta - 250 Juta (15%)
-    const layer2 = Math.min(sisaPKP, 190000000);
-    pphTahunan += layer2 * 0.15;
-    sisaPKP -= layer2;
+  if (pkp <= 0) return 0
+
+  // Lapisan PPh 21 Progresif Tahunan
+  let pajakTahunan = 0
+  let sisaPkp = pkp
+
+  // Lapisan 1: 5% (0 s/d 60 juta)
+  const lap1 = Math.min(sisaPkp, 60000000)
+  pajakTahunan += lap1 * 0.05
+  sisaPkp -= lap1
+
+  // Lapisan 2: 15% (60 juta s/d 250 juta)
+  if (sisaPkp > 0) {
+    const lap2 = Math.min(sisaPkp, 190000000)
+    pajakTahunan += lap2 * 0.15
+    sisaPkp -= lap2
   }
 
-  if (sisaPKP > 0) {
-    // Lapis 3: > 250 Juta - 500 Juta (25%)
-    const layer3 = Math.min(sisaPKP, 250000000);
-    pphTahunan += layer3 * 0.25;
-    sisaPKP -= layer3;
+  // Lapisan 3: 25% (250 juta s/d 500 juta)
+  if (sisaPkp > 0) {
+    const lap3 = Math.min(sisaPkp, 250000000)
+    pajakTahunan += lap3 * 0.25
+    sisaPkp -= lap3
   }
 
-  if (sisaPKP > 0) {
-    // Lapis 4: > 500 Juta - 5 Miliar (30%)
-    const layer4 = Math.min(sisaPKP, 4500000000);
-    pphTahunan += layer4 * 0.30;
-    sisaPKP -= layer4;
+  // Lapisan 4: 30% (> 500 juta)
+  if (sisaPkp > 0) {
+    pajakTahunan += sisaPkp * 0.30
   }
 
-  if (sisaPKP > 0) {
-    // Lapis 5: > 5 Miliar (35%)
-    pphTahunan += sisaPKP * 0.35;
-  }
-
-  return Math.round(pphTahunan / 12);
+  // Pajak Bulanan
+  return Math.round(pajakTahunan / 12)
 }

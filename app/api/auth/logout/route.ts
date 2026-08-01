@@ -1,7 +1,12 @@
-import { NextResponse } from 'next/server';
-import { deleteSession } from '@/lib/session';
+import { destroySession } from '@/lib/session'
+import { successResponse, errorResponse } from '@/lib/api-response'
 
 export async function POST() {
-  await deleteSession();
-  return NextResponse.json({ data: { message: 'Berhasil logout' } });
+  try {
+    await destroySession()
+    return successResponse({ message: 'Berhasil logout' })
+  } catch (error) {
+    console.error('Logout error:', error)
+    return errorResponse('Terjadi kesalahan saat logout', 500)
+  }
 }

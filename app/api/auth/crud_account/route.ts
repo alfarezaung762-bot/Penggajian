@@ -1,70 +1,54 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/session';
-import bcrypt from 'bcryptjs';
-import { catatLog } from '@/lib/log-aktivitas';
+import { NextRequest } from 'next/server'
+import bcrypt from 'bcryptjs'
+import prisma from '@/lib/prisma'
+import { getSession } from '@/lib/session'
+import { createAccountSchema } from '@/lib/validations/auth-schema'
+import { successResponse, errorResponse, unauthorizedResponse, forbiddenResponse } from '@/lib/api-response'
 
+// GET — list semua akun (admin_owner only)
 export async function GET() {
-  const session = await getSession();
-  if (!session || session.role !== 'admin_owner') {
-    return NextResponse.json({ error: 'Akses ditolak' }, { status: 403 });
-  }
+  const session = await getSession()
+  if (!session || session.type !== 'account') return unauthorizedResponse()
+  if (session.role !== 'admin_owner') return forbiddenResponse()
 
   const accounts = await prisma.account.findMany({
-    select: {
-      id: true,
-      name: true,
-      username: true,
-      role: true,
-      is_active: true,
-      created_at: true,
-    },
+    select: { id: true, name: true, username: true, role: true, is_active: true, created_at: true },
     orderBy: { created_at: 'desc' },
-  });
+  })
 
-  return NextResponse.json({ data: accounts });
+  return successResponse(accounts)
 }
 
-export async function POST(request: Request) {
-  const session = await getSession();
-  if (!session || session.role !== 'admin_owner') {
-    return NextResponse.json({ error: 'Akses ditolak' }, { status: 403 });
-  }
+// POST — buat akun baru (admin_owner only)
+export async function POST(request: NextRequest) {
+  const session = await getSession()
+  if (!session || session.type !== 'account') return unauthorizedResponse()
+  if (session.role !== 'admin_owner') return forbiddenResponse()
 
   try {
-    const { name, username, password, role } = await request.json();
+    const body = await request.json()
+    const result = createAccountSchema.safeParse(body)
+    if (!result.success) return errorResponse(result.error.issues[0]?.message || 'Input tidak valid')
 
-    if (!name || !username || !password || !role) {
-      return NextResponse.json({ error: 'Seluruh field wajib diisi' }, { status: 400 });
-    }
+    // Cek username unik
+    const existing = await prisma.account.findUnique({ where: { username: result.data.username } })
+    if (existing) return errorResponse('Username sudah digunakan')
 
-    const existing = await prisma.account.findUnique({ where: { username } });
-    if (existing) {
-      return NextResponse.json({ error: 'Username sudah digunakan' }, { status: 400 });
-    }
+    const hashedPassword = await bcrypt.hash(result.data.password, 10)
 
-    const password_hash = await bcrypt.hash(password, 10);
-    const newAccount = await prisma.account.create({
+    const account = await prisma.account.create({
       data: {
-        name,
-        username,
-        password_hash,
-        role,
-        is_active: true,
+        name: result.data.name,
+        username: result.data.username,
+        password_hash: hashedPassword,
+        role: result.data.role as 'hrd' | 'admin_owner',
       },
-    });
+      select: { id: true, name: true, username: true, role: true, is_active: true, created_at: true },
+    })
 
-    await catatLog({
-      account_id: session.id,
-      aksi: 'buat',
-      tabel_target: 'account',
-      id_target: newAccount.id,
-      nilai_baru: { name: newAccount.name, username: newAccount.username, role: newAccount.role },
-    });
-
-    return NextResponse.json({ data: newAccount }, { status: 201 });
+    return successResponse(account, 201)
   } catch (error) {
-    console.error('Error create account:', error);
-    return NextResponse.json({ error: 'Gagal membuat akun' }, { status: 500 });
+    console.error('Create account error:', error)
+    return errorResponse('Gagal membuat akun', 500)
   }
 }
