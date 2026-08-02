@@ -94,7 +94,7 @@ export default function PayrollPage() {
       const res = await fetch('/api/payroll/lock', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bulan, tahun }),
+        body: JSON.stringify({ bulan, tahun, action: 'lock' }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -107,6 +107,30 @@ export default function PayrollPage() {
       fetchPayroll()
     } catch {
       showToast('Gagal mengunci final payroll', 'error')
+    }
+    setLocking(false)
+  }
+
+  const handleUnlock = async () => {
+    if (!confirm(`BUKA KUNCI payroll ${namaBulan[bulan]} ${tahun}? Status akan kembali ke DRAFT sehingga draf absensi & slip gaji dapat direvisi kembali oleh HRD.`)) return
+    setLocking(true)
+    try {
+      const res = await fetch('/api/payroll/lock', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bulan, tahun, action: 'unlock' }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        showToast(data.error || 'Hanya Admin/Owner yang berhak membuka kunci payroll', 'error')
+        setLocking(false)
+        return
+      }
+
+      showToast('Kunci payroll berhasil dibuka! Status kembali ke DRAFT.', 'success')
+      fetchPayroll()
+    } catch {
+      showToast('Gagal membuka kunci payroll', 'error')
     }
     setLocking(false)
   }
@@ -172,7 +196,7 @@ export default function PayrollPage() {
           )}
           {isLocked && (
             <button
-              onClick={handleLock}
+              onClick={handleUnlock}
               disabled={locking}
               className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-xl text-xs transition-all disabled:opacity-50 flex items-center gap-2 shadow-xs"
               title="Buka kunci periode gaji ini agar draf dapat direvisi kembali oleh HRD"
