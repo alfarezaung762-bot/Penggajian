@@ -294,3 +294,32 @@ $$\text{Gaji Bersih} = \max\left(0, \text{Total Pendapatan} - \text{Total Potong
 1. **Pencatatan & Logging**: Blok `try-catch` dengan `console.error()` dan Prisma Query Logging (`prisma.$on('query')`).
 2. **Isolasi Masalah via Vitest**: Menjalankan *unit testing* terisolasi pada folder `tests/` untuk menguji fungsi kalkulasi tanpa memicu database runtime.
 3. **Perbaikan & Verifikasi (Contoh Bug)**: Mengatasi pergeseran tanggal absensi akibat timezone server vs WIB (UTC+7) menggunakan `Date.UTC(year, month, date)`.
+
+---
+
+## 12. PROSES & HASIL PENGUJIAN BLACKBOX TESTING (BLACKBOX TESTING & EXPECTED RESULTS)
+
+Pengujian Kotak Hitam (*Blackbox Testing*) difokuskan pada validasi fungsionalitas antarmuka pengguna (UI/UX), keakuratan respon form, dan kesesuaian alur kerja bisnis aplikasi terhadap spesifikasi resmi pada berkas [alur-sistem-penggajian.md](file:///c:/Users/ALFA/Documents/belajar%20coding/myproject/penggajian/dokumentasi/alur-sistem-penggajian.md).
+
+### 12.1 Matriks Skenario & Hasil Pengujian Blackbox Testing
+
+Tabel berikut menyajikan 15 skenario uji fungsionalitas utama yang mencakup seluruh alur pengguna (Karyawan, HRD, dan Admin/Owner), masukan pengujian (*test input*), serta kriteria hasil yang diperoleh (*Expected vs Actual Result*):
+
+| No | Modul & Fitur | Skenario Input & Langkah Eksekusi | Hasil Yang Diharapkan (*Expected Result*) | Hasil Aktual (*Actual Result*) | Status |
+|---|---|---|---|---|:---:|
+| **1** | **Autentikasi & RBAC (Sesi Login)** | Memasukkan username `hrd` dan password `hrd123` lalu mengeklik *Login*. | Sistem mengarahkan user ke Dashboard HRD (`/kelola_hrd_admin/data-karyawan`) dan menyimpan JWT Token di cookie `session`. | Pengguna berhasil masuk ke dashboard HRD dan token HTTP-only tersimpan aman. | 🟩 PASS |
+| **2** | **Proteksi Middleware (Bypass Route)** | User Karyawan biasa mencoba membuka URL `/kelola_hrd_admin/payroll` secara manual. | Middleware menolak akses dan otomatis mengarahkan balik ke portal Karyawan (`/karyawan/absensi`). | Pengaksesan ditolak dan di-redirect kembali ke halaman presensi karyawan. | 🟩 PASS |
+| **3** | **Validasi Form Zod (Data Karyawan)** | Memasukkan NIK 15 digit (kurang 1 digit) atau No Rekening 6 digit pada modal Tambah Karyawan. | Form menolak submit dan menampilkan pesan error validasi berbahasa Indonesia secara eksplisit. | Submit gagal dan pesan "NIK harus tepat 16 digit angka" tampil di layar. | 🟩 PASS |
+| **4** | **Upload Avatar Cloudinary** | Memilih berkas foto JPG/PNG dari komputer saat tambah/edit karyawan. | Foto profil avatar berhasil diproses, tersimpan di Cloudinary, dan tampil pada tabel directory & modal detail. | Lingkaran avatar foto profil karyawan tampil sempurna di tabel dan modal. | 🟩 PASS |
+| **5** | **Pencarian Real-Time (Data Karyawan)** | Mengetik nama `"Budi"` pada kolom input pencarian Data Karyawan. | Tabel directory menyaring data secara instan dan hanya menampilkan baris karyawan bernama Budi. | Daftar karyawan terfilter otomatis sesuai kueri pencarian. | 🟩 PASS |
+| **6** | **Presensi Masuk & Watermark** | Karyawan mengeklik *Presensi Masuk* dan mengunggah foto selfie presensi. | Status kehadiran tercatat (`hadir`/`telat` sesuai toleransi 15 menit) & foto selfie ber-watermark tanggal-jam-lokasi. | Record presensi tersimpan lengkap dengan foto selfie ber-watermark WIB. | 🟩 PASS |
+| **7** | **Form Dinamis Pengajuan (Cuti/Sakit/Lembur)** | Karyawan memilih opsi `Cuti` pada dropdown Jenis Pengajuan. | Form menyesuaikan bidang input (Tanggal Mulai/Selesai, Alasan) dan menampilkan sisa kuota cuti secara real-time. | Field form berubah dinamis dan sisa saldo cuti ditampilkan di atas form. | 🟩 PASS |
+| **8** | **Validasi Aturan H-2 (Cuti & Lembur)** | Karyawan mengajukan Cuti atau Lembur untuk pelaksanaan besok (H-1). | Sistem menolak pengajuan dengan pesan error *"Pengajuan Cuti/Lembur minimal H-2"*. | Form menolak pengiriman dan menampilkan notifikasi peringatan H-2. | 🟩 PASS |
+| **9** | **Pengajuan Sakit Darurat (H-0)** | Karyawan mengajukan Sakit di hari yang sama (H-0) + Upload bukti foto surat dokter. | Sistem menerima pengajuan karena bersifat darurat dan menetapkan status `menunggu`. | Pengajuan sakit berhasil terkirim tanpa terhalang aturan H-2. | 🟩 PASS |
+| **10** | **Approval & Catatan HRD** | HRD mengeklik tombol *Setujui* atau *Tolak* (dengan memasukkan catatan alasan). | Status di portal Karyawan diperbarui secara real-time dan sisa kuota cuti berkurang otomatis jika disetujui. | Status pengajuan berubah dan saldo cuti terpotong secara sinkron. | 🟩 PASS |
+| **11** | **Koreksi Absensi & Audit Trail (HRD)** | HRD mengoreksi status absensi dari `Hadir` menjadi `Alpha` pada Rekap Absensi. | Status absensi berubah dan sistem merekam transaksi ke `log_aktivitas` (memuat `nilai_lama` vs `nilai_baru`). | Koreksi tersimpan dan audit log mencatat histori perubahan data. | 🟩 PASS |
+| **12** | **Kalkulasi Batch Payroll (PPh 21 TER)** | Admin mengeklik tombol *Hitung Payroll Periode Agustus 2026*. | Sistem mengkalkulasi gaji pokok, tunjangan, lembur, BPJS, denda alpha, dan PPh 21 TER untuk 31 karyawan. | Draf slip gaji 31 karyawan terhitung otomatis dengan rincian pendapatan & potongan. | 🟩 PASS |
+| **13** | **Atur Cutoff & Recalculate BNI** | HRD/Admin mengatur tanggal cutoff payroll (misal tgl 25) pada Laporan Gaji & BNI. | Draf payroll 31 karyawan dihitung ulang otomatis mengikuti tanggal cutoff dan audit log tercatat. | Rekapitulasi laporan BNI diperbarui secara presisi sesuai rentang cutoff. | 🟩 PASS |
+| **14** | **Payroll Locking & Unlock Period** | Admin mengeklik *🔒 Kunci Periode Penggajian*, lalu mengetes tombol *🔓 Buka Kunci*. | Status periode berubah menjadi `terkunci` (tombol edit dibekukan), dan dapat dikembalikan ke `draft` saat disetujui. | Periode ter-lock aman dari perubah data dan bisa di-unlock oleh role Admin/Owner. | 🟩 PASS |
+| **15** | **Cetak PDF Slip Gaji & Laporan** | Karyawan / HRD mengeklik tombol *Cetak PDF* pada Slip Gaji / Laporan Rekap. | File dokumen PDF resmi ber-header profesional ter-generate dan langsung dapat diunduh pengguna. | File PDF Slip Gaji terunduh dengan rincian data finansial yang akurat. | 🟩 PASS |
+
