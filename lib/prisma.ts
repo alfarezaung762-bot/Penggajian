@@ -1,9 +1,10 @@
+import 'dotenv/config'
 import { PrismaClient } from '@/app/generated/prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { Pool } from 'pg'
 
 function createPrismaClient() {
-  const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:12345@localhost:5432/Penggajian?schema=public'
+  const connectionString = process.env.DATABASE_URL
   const pool = new Pool({ connectionString })
   const adapter = new PrismaPg(pool)
 

@@ -1,27 +1,12 @@
-import fs from 'fs'
-import path from 'path'
-
-// Load .env file
-const envPath = path.resolve(__dirname, '../.env')
-if (fs.existsSync(envPath)) {
-  const envConfig = fs.readFileSync(envPath, 'utf8')
-  for (const line of envConfig.split('\n')) {
-    const trimmed = line.trim()
-    if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
-      const idx = trimmed.indexOf('=')
-      const key = trimmed.substring(0, idx).trim()
-      const val = trimmed.substring(idx + 1).trim().replace(/^["']|["']$/g, '')
-      process.env[key] = val
-    }
-  }
-}
-
+import 'dotenv/config'
 import prisma from '../lib/prisma'
 import { role_account, gender_employee, status_pernikahan_employee, status_kepegawaian_employee, jenis_pengajuan, status_pengajuan, status_periode, aksi_log } from '../app/generated/prisma/client'
 import bcrypt from 'bcryptjs'
 
 async function main() {
-  console.log('🌱 Memulai Clean Reset & Seeding Data Dummy Penggajian...')
+  const dbUrl = process.env.DATABASE_URL || ''
+  const maskedHost = dbUrl.includes('@') ? dbUrl.split('@')[1] : 'unknown host'
+  console.log(`🌱 Memulai Clean Reset & Seeding Data Dummy ke: [${maskedHost}]...`)
 
   // 0. Hapus Data Lama Berdasarkan Urutan Relasi Foreign Key
   await prisma.slip_gaji_detail.deleteMany()
