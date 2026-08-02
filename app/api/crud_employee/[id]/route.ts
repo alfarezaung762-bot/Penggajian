@@ -64,6 +64,15 @@ export async function PATCH(
     const updateData: Record<string, unknown> = { ...result.data }
     if (result.data.join_date) updateData.join_date = new Date(result.data.join_date)
 
+    if (result.data.photo_url && result.data.photo_url.startsWith('data:image/')) {
+      try {
+        const { uploadFotoProfil } = await import('@/lib/cloudinary_service/upload-foto-profil')
+        updateData.photo_url = await uploadFotoProfil(result.data.photo_url, employeeId)
+      } catch (err) {
+        console.warn('Gagal update foto profil:', err)
+      }
+    }
+
     // Recalculate tanggal nonaktif if relevant fields changed
     if (result.data.status_kepegawaian || result.data.durasi_kontrak_bulan || result.data.join_date) {
       const kepegawaian = result.data.status_kepegawaian || existing.status_kepegawaian

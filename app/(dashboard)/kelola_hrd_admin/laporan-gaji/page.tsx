@@ -29,8 +29,15 @@ export default function LaporanGajiPage() {
   const [loading, setLoading] = useState(true)
   const [bulan, setBulan] = useState(new Date().getMonth() + 1)
   const [tahun, setTahun] = useState(new Date().getFullYear())
+  const [periodeData, setPeriodeData] = useState<{ id: number; bulan: number; tahun: number; tanggal_mulai: string; tanggal_selesai: string; status: string } | null>(null)
   const [periodeStatus, setPeriodeStatus] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+
+  // Modal Cutoff State
+  const [showCutoffModal, setShowCutoffModal] = useState(false)
+  const [cutoffDateInput, setCutoffDateInput] = useState('')
+  const [savingCutoff, setSavingCutoff] = useState(false)
+  const [cutoffMessage, setCutoffMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   const fetchReport = useCallback(async () => {
     setLoading(true)
@@ -39,13 +46,19 @@ export default function LaporanGajiPage() {
       const data = await res.json()
       if (data.data) {
         setReports(data.data.reports || [])
+        setPeriodeData(data.data.periode || null)
         setPeriodeStatus(data.data.periode?.status || null)
+        if (data.data.periode?.tanggal_selesai) {
+          setCutoffDateInput(new Date(data.data.periode.tanggal_selesai).toISOString().split('T')[0])
+        }
       } else {
         setReports([])
+        setPeriodeData(null)
         setPeriodeStatus(null)
       }
     } catch {
       setReports([])
+      setPeriodeData(null)
       setPeriodeStatus(null)
     }
     setLoading(false)
@@ -54,6 +67,38 @@ export default function LaporanGajiPage() {
   useEffect(() => {
     fetchReport()
   }, [fetchReport])
+
+  const handleUpdateCutoff = async () => {
+    if (!periodeData) return
+    setSavingCutoff(true)
+    setCutoffMessage(null)
+
+    try {
+      const res = await fetch(`/api/call_payroll/${periodeData.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tanggal_selesai: cutoffDateInput }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        setCutoffMessage({ type: 'error', text: data.error || 'Gagal mengubah tanggal cutoff.' })
+        setSavingCutoff(false)
+        return
+      }
+
+      setCutoffMessage({ type: 'success', text: data.data.message || 'Tanggal cutoff berhasil diperbarui!' })
+      setTimeout(() => {
+        setShowCutoffModal(false)
+        setCutoffMessage(null)
+        fetchReport()
+      }, 1200)
+    } catch {
+      setCutoffMessage({ type: 'error', text: 'Terjadi kesalahan sistem. Coba lagi.' })
+    }
+    setSavingCutoff(false)
+  }
 
   const fmt = (n: number) => Number(n || 0).toLocaleString('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 })
   const namaBulan = ['', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember']
@@ -132,13 +177,23 @@ export default function LaporanGajiPage() {
           <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">Laporan Penggajian & BNI Transfer</h1>
           <p className="text-xs text-slate-500">Rekapitulasi pencairan dana penggajian dan instruksi transfer Bank BNI.</p>
         </div>
-        <button
-          onClick={() => window.print()}
-          disabled={reports.length === 0}
-          className="px-5 py-2.5 bg-[#0f172a] hover:bg-[#1e293b] text-white rounded-xl font-bold text-xs transition-all flex items-center gap-2 shadow-xs disabled:opacity-50"
-        >
-          <Printer size={16} /> Cetak Laporan Penggajian BNI (PDF)
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowCutoffModal(true)}
+            disabled={!periodeData || periodeStatus === 'terkunci'}
+            className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-xl text-xs transition-all flex items-center gap-1.5 shadow-xs disabled:opacity-40 disabled:cursor-not-allowed"
+            title={periodeStatus === 'terkunci' ? 'Periode sudah dikunci, tanggal cutoff tidak dapat diubah' : 'Atur tanggal cutoff absensi & transfer BNI'}
+          >
+            ✏️ Atur Tanggal Transfer & Cutoff
+          </button>
+          <button
+            onClick={() => window.print()}
+            disabled={reports.length === 0}
+            className="px-5 py-2.5 bg-[#0f172a] hover:bg-[#1e293b] text-white rounded-xl font-bold text-xs transition-all flex items-center gap-2 shadow-xs disabled:opacity-50"
+          >
+            <Printer size={16} /> Cetak Laporan Penggajian BNI (PDF)
+          </button>
+        </div>
       </div>
 
       {/* Toolbar Filter & Pencarian Karyawan */}
@@ -317,6 +372,75 @@ export default function LaporanGajiPage() {
           </div>
         </div>
       </div>
+
+      {/* Modal Dialog Atur Tanggal Cutoff & Transfer BNI */}
+      {showCutoffModal && periodeData && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 no-print animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">✏️ Atur Tanggal Cutoff & Transfer BNI</h3>
+                <p className="text-xs text-slate-500 mt-0.5">Periode Gaji: {namaBulan[bulan]} {tahun}</p>
+              </div>
+              <button
+                onClick={() => setShowCutoffModal(false)}
+                className="text-slate-400 hover:text-slate-600 text-lg font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4 py-4">
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 text-xs text-amber-900 leading-relaxed">
+                <p className="font-bold flex items-center gap-1.5 text-amber-950 mb-1">
+                  <AlertCircle size={14} className="text-amber-600 shrink-0" /> Restriksi Sistem (Strict Guardrails):
+                </p>
+                <ul className="list-disc list-inside space-y-0.5 text-[11px] text-amber-800">
+                  <li>Status periode harus <strong>DRAFT</strong> (tidak terkunci).</li>
+                  <li>Tanggal cutoff hanya boleh dipilih antara <strong>tanggal 20 s/d akhir bulan</strong>.</li>
+                  <li>Mengubah tanggal cutoff otomatis menghitung ulang draf payroll 31 karyawan & mencatat di <strong>Audit Log</strong>.</li>
+                </ul>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">Tanggal Cutoff Absensi & Transfer (tanggal_selesai)</label>
+                <input
+                  type="date"
+                  value={cutoffDateInput}
+                  onChange={(e) => setCutoffDateInput(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-slate-900 bg-slate-50"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">Format: YYYY-MM-DD (Contoh: 2026-06-25 atau 2026-06-30)</p>
+              </div>
+
+              {cutoffMessage && (
+                <div className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 ${cutoffMessage.type === 'success' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'}`}>
+                  {cutoffMessage.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                  {cutoffMessage.text}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowCutoffModal(false)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleUpdateCutoff}
+                disabled={savingCutoff}
+                className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition-all shadow-xs disabled:opacity-50 flex items-center gap-2"
+              >
+                {savingCutoff ? 'Menghitung Ulang Payroll...' : 'Simpan & Hitung Ulang'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

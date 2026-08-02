@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useToast } from '@/app/components/ToastProvider'
-import { Plus, Search, Edit, UserX, UserCheck, KeyRound, Eye, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Plus, Search, Edit, UserX, UserCheck, KeyRound, Eye, ChevronLeft, ChevronRight, Camera, HelpCircle } from 'lucide-react'
 
 export default function DataKaryawanPage() {
   const { showToast } = useToast()
@@ -47,8 +47,24 @@ export default function DataKaryawanPage() {
       status_pernikahan: emp.status_pernikahan as string, jumlah_tanggungan: emp.jumlah_tanggungan as number,
       bank_account_number: emp.bank_account_number as string, status_kepegawaian: emp.status_kepegawaian as string,
       durasi_kontrak_bulan: (emp.durasi_kontrak_bulan as number) || 0,
+      photo_url: (emp.photo_url as string) || '',
     })
     setShowModal(true)
+  }
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        showToast('Ukuran foto maksimal 5MB', 'warning')
+        return
+      }
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        setForm(p => ({ ...p, photo_url: reader.result as string }))
+      }
+      reader.readAsDataURL(file)
+    }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -98,7 +114,7 @@ export default function DataKaryawanPage() {
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">Data Karyawan</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Kelola data seluruh karyawan, status kepegawaian, dan akun.</p>
+          <p className="text-xs text-slate-500 mt-0.5">Kelola data seluruh karyawan, foto profil avatar, status kepegawaian, dan akun.</p>
         </div>
         <button
           onClick={openAdd}
@@ -149,9 +165,16 @@ export default function DataKaryawanPage() {
               {employees.map((emp) => (
                 <tr key={emp.id as number} className="hover:bg-slate-50/80 transition-colors">
                   <td className="px-6 py-4 font-bold text-slate-900">
-                    <div>
-                      <p className="text-xs font-bold text-slate-900">{emp.name as string}</p>
-                      <p className="text-[10px] font-normal text-slate-400">@{emp.username as string}</p>
+                    <div className="flex items-center gap-3">
+                      <img
+                        src={(emp.photo_url as string) || `https://ui-avatars.com/api/?name=${encodeURIComponent(emp.name as string)}&background=0F172A&color=fff&size=200`}
+                        alt={emp.name as string}
+                        className="w-9 h-9 rounded-full object-cover border border-slate-200 shadow-xs shrink-0"
+                      />
+                      <div>
+                        <p className="text-xs font-bold text-slate-900">{emp.name as string}</p>
+                        <p className="text-[10px] font-normal text-slate-400">@{emp.username as string}</p>
+                      </div>
                     </div>
                   </td>
                   <td className="px-6 py-4 text-slate-600 font-mono font-medium">{emp.nik as string}</td>
@@ -200,6 +223,20 @@ export default function DataKaryawanPage() {
         <div className="modal-overlay" onClick={() => setShowDetail(null)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center"><h3 className="text-sm font-bold text-slate-900">Detail Karyawan</h3><button onClick={() => setShowDetail(null)} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400">✕</button></div>
+            <div className="px-6 pt-5 pb-3 flex items-center gap-4 bg-slate-50 border-b border-slate-100">
+              <img
+                src={(showDetail.photo_url as string) || `https://ui-avatars.com/api/?name=${encodeURIComponent(showDetail.name as string)}&background=0F172A&color=fff&size=200`}
+                alt={showDetail.name as string}
+                className="w-14 h-14 rounded-full object-cover border-2 border-white shadow-xs shrink-0"
+              />
+              <div>
+                <h4 className="font-bold text-sm text-slate-900">{showDetail.name as string}</h4>
+                <p className="text-xs text-slate-500 font-mono">@{showDetail.username as string} • NIK: {showDetail.nik as string}</p>
+                <span className={`inline-block mt-1 badge ${showDetail.is_active ? 'badge-success' : 'badge-danger'}`}>
+                  {showDetail.is_active ? 'Status: Aktif' : 'Status: Nonaktif'}
+                </span>
+              </div>
+            </div>
             <div className="p-6 grid grid-cols-2 gap-4 text-xs">
               {[
                 ['Nama Lengkap', showDetail.name], ['NIK', showDetail.nik], ['Username', showDetail.username], ['Jabatan', (showDetail.jabatan as Record<string, unknown>)?.nama],
@@ -221,6 +258,33 @@ export default function DataKaryawanPage() {
           <div className="modal-content modal-content-lg" onClick={e => e.stopPropagation()}>
             <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center"><h3 className="text-sm font-bold text-slate-900">{editId ? 'Edit Data Karyawan' : 'Tambah Karyawan Baru'}</h3><button onClick={() => setShowModal(false)} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400">✕</button></div>
             <form onSubmit={handleSubmit} className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              
+              {/* Photo Avatar Upload */}
+              <div className="md:col-span-2 bg-slate-50 border border-slate-200 p-4 rounded-xl mb-1">
+                <label className="block text-xs font-semibold text-slate-800 mb-2">Foto Profil Karyawan (Cloudinary / File)</label>
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-full bg-slate-200 border-2 border-white shadow-xs overflow-hidden flex items-center justify-center shrink-0">
+                    {form.photo_url ? (
+                      <img src={String(form.photo_url)} alt="Preview Avatar" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-slate-400 font-bold text-base">{form.name ? String(form.name).charAt(0).toUpperCase() : '?'}</span>
+                    )}
+                  </div>
+                  <div className="space-y-1.5 flex-1">
+                    <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-semibold shadow-xs transition-all">
+                      <Camera size={14} className="text-slate-500" /> Upload Foto Baru
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleFileChange}
+                      />
+                    </label>
+                    <p className="text-[10px] text-slate-400">Pilih berkas JPG/PNG (Maks 5MB). Otomatis diunggah & diproses Cloudinary.</p>
+                  </div>
+                </div>
+              </div>
+
               <div><label className="block text-xs font-semibold mb-1">Nama Lengkap *</label><input required value={form.name || ''} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none" /></div>
               <div><label className="block text-xs font-semibold mb-1">NIK (16 digit) *</label><input required maxLength={16} pattern="[0-9]{16}" value={form.nik || ''} onChange={e => setForm(p => ({ ...p, nik: e.target.value.replace(/\D/g, '').slice(0, 16) }))} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 font-mono focus:outline-none" /></div>
               <div><label className="block text-xs font-semibold mb-1">Username *</label><input required value={form.username || ''} onChange={e => setForm(p => ({ ...p, username: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none" /></div>
@@ -229,7 +293,19 @@ export default function DataKaryawanPage() {
               <div><label className="block text-xs font-semibold mb-1">Jenis Kelamin *</label><select required value={form.gender || ''} onChange={e => setForm(p => ({ ...p, gender: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none"><option value="">Pilih</option><option value="L">Laki-laki</option><option value="P">Perempuan</option></select></div>
               <div><label className="block text-xs font-semibold mb-1">Tanggal Masuk *</label><input required type="date" value={form.join_date || ''} onChange={e => setForm(p => ({ ...p, join_date: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none" /></div>
               <div><label className="block text-xs font-semibold mb-1">Status Pernikahan *</label><select required value={form.status_pernikahan || ''} onChange={e => setForm(p => ({ ...p, status_pernikahan: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none"><option value="">Pilih</option><option value="TK">Tidak Kawin</option><option value="K">Kawin</option></select></div>
-              <div><label className="block text-xs font-semibold mb-1">Jumlah Tanggungan *</label><input required type="number" min={0} max={3} value={form.jumlah_tanggungan ?? ''} onChange={e => setForm(p => ({ ...p, jumlah_tanggungan: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none" /></div>
+              <div>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <label className="block text-xs font-semibold text-slate-800">Jumlah Tanggungan *</label>
+                  <div className="relative group cursor-pointer inline-flex items-center">
+                    <HelpCircle size={13} className="text-slate-400 hover:text-blue-600 transition-colors" />
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block w-60 p-2.5 bg-slate-900 text-white text-[11px] font-normal rounded-xl shadow-2xl z-50 leading-relaxed pointer-events-none">
+                      Jumlah tanggungan keluarga (anak/tanggungan sah, maks 3 orang) yang dipakai sistem untuk menghitung batas bebas pajak (PTKP) PPh 21.
+                      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900"></div>
+                    </div>
+                  </div>
+                </div>
+                <input required type="number" min={0} max={3} value={form.jumlah_tanggungan ?? ''} onChange={e => setForm(p => ({ ...p, jumlah_tanggungan: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none" placeholder="0 - 3 (anak/tanggungan)" />
+              </div>
               <div><label className="block text-xs font-semibold mb-1">No. Rekening BNI (10 digit) *</label><input required maxLength={10} pattern="[0-9]{10}" value={form.bank_account_number || ''} onChange={e => setForm(p => ({ ...p, bank_account_number: e.target.value.replace(/\D/g, '').slice(0, 10) }))} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 font-mono focus:outline-none" /></div>
               <div><label className="block text-xs font-semibold mb-1">Status Kepegawaian *</label><select required value={form.status_kepegawaian || ''} onChange={e => setForm(p => ({ ...p, status_kepegawaian: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none"><option value="">Pilih</option><option value="tetap">Tetap</option><option value="kontrak">Kontrak</option></select></div>
               {form.status_kepegawaian === 'kontrak' && <div><label className="block text-xs font-semibold mb-1">Durasi Kontrak (bulan) *</label><input required type="number" min={1} max={120} value={form.durasi_kontrak_bulan || ''} onChange={e => setForm(p => ({ ...p, durasi_kontrak_bulan: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none" /></div>}

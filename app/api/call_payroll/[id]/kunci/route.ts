@@ -17,11 +17,22 @@ export async function PATCH(
 
   const existing = await prisma.periode_penggajian.findUnique({ where: { id: periodeId } })
   if (!existing) return errorResponse('Periode penggajian tidak ditemukan', 404)
-  if (existing.status === 'terkunci') return errorResponse('Periode penggajian sudah dikunci sebelumnya')
+  const newStatus = existing.status === 'terkunci' ? 'draft' : 'terkunci'
 
   const updated = await prisma.periode_penggajian.update({
     where: { id: periodeId },
-    data: { status: 'terkunci' },
+    data: { status: newStatus },
+  })
+
+  // Catat Audit Log
+  await prisma.log_aktivitas.create({
+    data: {
+      account_id: session.id,
+      aksi: newStatus === 'terkunci' ? 'kunci' : 'buka_kunci',
+      tabel_target: 'periode_penggajian',
+      id_target: periodeId,
+      nilai_baru: { status: newStatus },
+    },
   })
 
   return successResponse(updated)

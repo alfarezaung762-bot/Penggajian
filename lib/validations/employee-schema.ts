@@ -36,7 +36,7 @@ export const createEmployeeSchema = z.object({
     .max(120, { error: 'Durasi kontrak maksimal 120 bulan' })
     .nullable()
     .optional(),
-  photo_url: z.string().max(255).nullable().optional(),
+  photo_url: z.string().nullable().optional(),
 }).refine(
   (data) => {
     if (data.status_kepegawaian === 'kontrak') {
@@ -73,5 +73,5 @@ export const updateEmployeeSchema = z.object({
   status_kepegawaian: z.enum(['tetap', 'kontrak']).optional(),
   durasi_kontrak_bulan: z.number().int().min(1).max(120).nullable().optional(),
   is_active: z.boolean().optional(),
-  photo_url: z.string().max(255).nullable().optional(),
+  photo_url: z.string().nullable().optional(),
 })

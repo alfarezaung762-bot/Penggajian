@@ -148,7 +148,7 @@ export default function LoginPage() {
                 onClick={() => fillDemo('budi', 'password123', 'employee')}
                 className="p-2 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-200 text-left text-[11px] transition-all"
               >
-                <p className="font-bold text-slate-800">Karyawan</p>
+                <p className="font-bold text-slate-800">Karyawan (Demo)</p>
                 <p className="text-slate-500 font-mono text-[10px]">budi</p>
               </button>
               <button
@@ -166,6 +166,30 @@ export default function LoginPage() {
               >
                 <p className="font-bold text-slate-800">Admin Owner</p>
                 <p className="text-slate-500 font-mono text-[10px]">admin</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => fillDemo('budi_santoso', 'password123', 'employee')}
+                className="p-2 bg-blue-50 hover:bg-blue-100 rounded-xl border border-blue-200 text-left text-[11px] transition-all"
+              >
+                <p className="font-bold text-blue-900">Budi Santoso</p>
+                <p className="text-blue-700 font-mono text-[10px]">budi_santoso</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => fillDemo('dewi_lestari', 'password123', 'employee')}
+                className="p-2 bg-emerald-50 hover:bg-emerald-100 rounded-xl border border-emerald-200 text-left text-[11px] transition-all"
+              >
+                <p className="font-bold text-emerald-900">Dewi (Lembur)</p>
+                <p className="text-emerald-700 font-mono text-[10px]">dewi_lestari</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => fillDemo('hendra_gunawan', 'password123', 'employee')}
+                className="p-2 bg-rose-50 hover:bg-rose-100 rounded-xl border border-rose-200 text-left text-[11px] transition-all"
+              >
+                <p className="font-bold text-rose-900">Hendra (Alpha)</p>
+                <p className="text-rose-700 font-mono text-[10px]">hendra_gunawan</p>
               </button>
             </div>
           </div>

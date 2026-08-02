@@ -170,6 +170,16 @@ export default function PayrollPage() {
               <Lock size={16} /> {locking ? 'Mengunci...' : 'Kunci Final Penggajian'}
             </button>
           )}
+          {isLocked && (
+            <button
+              onClick={handleLock}
+              disabled={locking}
+              className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-xl text-xs transition-all disabled:opacity-50 flex items-center gap-2 shadow-xs"
+              title="Buka kunci periode gaji ini agar draf dapat direvisi kembali oleh HRD"
+            >
+              <Lock size={16} /> {locking ? 'Membuka Kunci...' : '🔓 Buka Kunci Periode (Unlock)'}
+            </button>
+          )}
         </div>
       </div>
 

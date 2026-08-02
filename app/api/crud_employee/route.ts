@@ -87,6 +87,16 @@ export async function POST(request: NextRequest) {
       tanggalNonaktif.setMonth(tanggalNonaktif.getMonth() + result.data.durasi_kontrak_bulan)
     }
 
+    let photoUrl = result.data.photo_url ?? null
+    if (photoUrl && photoUrl.startsWith('data:image/')) {
+      try {
+        const { uploadFotoProfil } = await import('@/lib/cloudinary_service/upload-foto-profil')
+        photoUrl = await uploadFotoProfil(photoUrl, Date.now())
+      } catch (err) {
+        console.warn('Gagal upload foto profil:', err)
+      }
+    }
+
     const employee = await prisma.employee.create({
       data: {
         jabatan_id: result.data.jabatan_id,
@@ -102,7 +112,7 @@ export async function POST(request: NextRequest) {
         status_kepegawaian: result.data.status_kepegawaian as 'tetap' | 'kontrak',
         durasi_kontrak_bulan: result.data.durasi_kontrak_bulan ?? null,
         tanggal_nonaktif_otomatis: tanggalNonaktif,
-        photo_url: result.data.photo_url ?? null,
+        photo_url: photoUrl,
       },
       include: { jabatan: true },
       omit: { password_hash: true },

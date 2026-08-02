@@ -45,7 +45,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={{ showToast }}>
       {children}
       {/* Toast Notification Container — Prominent Top-Center Placement */}
-      <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] space-y-3 max-w-lg w-[92vw] sm:w-full pointer-events-none">
+      <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100000] space-y-3 max-w-lg w-[92vw] sm:w-full pointer-events-none">
         {toasts.map((t) => (
           <div
             key={t.id}
