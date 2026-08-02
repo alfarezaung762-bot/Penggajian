@@ -9,7 +9,7 @@ const encodedKey = new TextEncoder().encode(secretKey)
 const publicRoutes = ['/login']
 const publicApiRoutes = ['/api/auth/login-staff', '/api/auth/login-employee']
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // Lewati route publik

@@ -83,6 +83,7 @@ export default function AbsensiKaryawanPage() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
 
   const [absensiToday, setAbsensiToday] = useState<AbsensiHariIni | null>(null)
   const [jadwal, setJadwal] = useState<Jadwal | null>(null)
@@ -198,23 +199,49 @@ export default function AbsensiKaryawanPage() {
     }
   }
 
+  // Sinkronisasi stream ke elemen <video> begitu komponen dirender oleh React
+  useEffect(() => {
+    if (cameraActive && streamRef.current && videoRef.current) {
+      videoRef.current.srcObject = streamRef.current
+    }
+  }, [cameraActive])
+
+  // Cleanup stream jika komponen unmount
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop())
+      }
+    }
+  }, [])
+
   const startCamera = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      showToast('Browser memblokir kamera di HTTP non-localhost. Gunakan HTTPS atau unggah file foto.', 'error')
+      return
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 } })
+      streamRef.current = stream
+      setCapturedPhoto(null)
+      setCameraActive(true)
+
+      // Pasang langsung jika videoRef sudah mounted
       if (videoRef.current) {
         videoRef.current.srcObject = stream
-        setCameraActive(true)
-        setCapturedPhoto(null)
       }
     } catch {
-      showToast('Gagal mengakses kamera. Gunakan opsi unggah foto file.', 'warning')
+      showToast('Gagal mengakses kamera. Pastikan izin kamera diberikan atau gunakan opsi unggah foto.', 'warning')
     }
   }
 
   const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop())
+      streamRef.current = null
+    }
     if (videoRef.current?.srcObject) {
-      const tracks = (videoRef.current.srcObject as MediaStream).getTracks()
-      tracks.forEach(t => t.stop())
       videoRef.current.srcObject = null
     }
     setCameraActive(false)
